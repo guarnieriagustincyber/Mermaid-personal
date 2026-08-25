@@ -1,19 +1,89 @@
 /**
- * MermaidFlow Studio - Ultra-Responsive, Collision-Free Bidirectional Flowchart Editor
+ * MermaidFlow Studio - True SVG Vector Flowchart & Bidirectional Mermaid Editor
  * High-Performance Vanilla JS + SVG Architecture
  */
 
 (function () {
   'use strict';
 
-  // --- NODE SHAPE DEFINITIONS ---
+  // --- NODE SHAPE DEFINITIONS WITH PURE VECTOR SVG GENERATORS ---
   const SHAPES = {
-    terminal:   { name: 'Inicio / Fin', prefix: '([', suffix: '])', className: 'shape-terminal', defaultText: 'Inicio' },
-    process:    { name: 'Proceso', prefix: '[', suffix: ']', className: 'shape-process', defaultText: 'Proceso' },
-    decision:   { name: 'Decisión', prefix: '{', suffix: '}', className: 'shape-decision', defaultText: '¿Es válido?' },
-    database:   { name: 'Base de Datos', prefix: '[(', suffix: ')]', className: 'shape-database', defaultText: 'Base de Datos' },
-    io:         { name: 'Entrada / Salida', prefix: '[/', suffix: '/]', className: 'shape-io', defaultText: 'Leer Datos' },
-    subroutine: { name: 'Subproceso', prefix: '[[', suffix: ']]', className: 'shape-subroutine', defaultText: 'Subproceso()' }
+    terminal: {
+      name: 'Inicio / Fin',
+      prefix: '([',
+      suffix: '])',
+      defaultText: 'Inicio',
+      defaultWidth: 140,
+      defaultHeight: 52,
+      generateSvg: (w, h) => `
+        <rect x="2" y="2" width="${w - 4}" height="${h - 4}" rx="${(h - 4) / 2}" ry="${(h - 4) / 2}" class="shape-svg-fill" />
+      `
+    },
+    process: {
+      name: 'Proceso',
+      prefix: '[',
+      suffix: ']',
+      defaultText: 'Proceso',
+      defaultWidth: 140,
+      defaultHeight: 52,
+      generateSvg: (w, h) => `
+        <rect x="2" y="2" width="${w - 4}" height="${h - 4}" rx="6" ry="6" class="shape-svg-fill" />
+      `
+    },
+    decision: {
+      name: 'Decisión',
+      prefix: '{',
+      suffix: '}',
+      defaultText: '¿Es válido?',
+      defaultWidth: 160,
+      defaultHeight: 76,
+      generateSvg: (w, h) => `
+        <polygon points="${w / 2},2 ${w - 2},${h / 2} ${w / 2},${h - 2} 2,${h / 2}" class="shape-svg-fill" />
+      `
+    },
+    database: {
+      name: 'Base de Datos',
+      prefix: '[(',
+      suffix: ')]',
+      defaultText: 'Base de Datos',
+      defaultWidth: 140,
+      defaultHeight: 64,
+      generateSvg: (w, h) => {
+        const ry = 9;
+        const cyTop = 12;
+        const cyBot = h - 12;
+        const rx = (w - 4) / 2;
+        return `
+          <path d="M 2 ${cyTop} L 2 ${cyBot} A ${rx} ${ry} 0 0 0 ${w - 2} ${cyBot} L ${w - 2} ${cyTop} Z" class="shape-svg-fill" />
+          <ellipse cx="${w / 2}" cy="${cyTop}" rx="${rx}" ry="${ry}" class="shape-svg-fill" />
+          <path d="M 2 ${cyTop} A ${rx} ${ry} 0 0 0 ${w - 2} ${cyTop}" class="shape-svg-stroke" fill="none" />
+        `;
+      }
+    },
+    io: {
+      name: 'Entrada / Salida',
+      prefix: '[/',
+      suffix: '/]',
+      defaultText: 'Leer Datos',
+      defaultWidth: 150,
+      defaultHeight: 52,
+      generateSvg: (w, h) => `
+        <polygon points="18,2 ${w - 2},2 ${w - 18},${h - 2} 2,${h - 2}" class="shape-svg-fill" />
+      `
+    },
+    subroutine: {
+      name: 'Subproceso',
+      prefix: '[[',
+      suffix: ']]',
+      defaultText: 'Subproceso()',
+      defaultWidth: 150,
+      defaultHeight: 52,
+      generateSvg: (w, h) => `
+        <rect x="2" y="2" width="${w - 4}" height="${h - 4}" rx="4" ry="4" class="shape-svg-fill" />
+        <line x1="14" y1="2" x2="14" y2="${h - 2}" class="shape-svg-stroke" />
+        <line x1="${w - 14}" y1="2" x2="${w - 14}" y2="${h - 2}" class="shape-svg-stroke" />
+      `
+    }
   };
 
   // --- STATE ---
@@ -86,7 +156,6 @@
   };
 
   let codeDebounceTimer = null;
-  let rafId = null;
 
   // --- INITIALIZATION ---
   function init() {
@@ -94,7 +163,6 @@
     setupEventListeners();
     setupDockButtons();
 
-    // Responsive check: if screen is narrow, collapse code panel by default
     if (window.innerWidth <= 800) {
       setCodePanel(false);
     }
@@ -227,8 +295,8 @@
       label: label || shapeDef.defaultText,
       x: Math.round(x),
       y: Math.round(y),
-      width: shape === 'decision' ? 150 : 140,
-      height: shape === 'decision' ? 60 : 52
+      width: shapeDef.defaultWidth,
+      height: shapeDef.defaultHeight
     };
 
     state.nodes.push(node);
@@ -282,14 +350,14 @@
     let newY = fromNode.y;
 
     if (conditionLabel === 'Sí') {
-      newX = isHorizontal ? fromNode.x + 220 : fromNode.x - 110;
-      newY = isHorizontal ? fromNode.y - 70 : fromNode.y + 130;
+      newX = isHorizontal ? fromNode.x + 230 : fromNode.x - 120;
+      newY = isHorizontal ? fromNode.y - 80 : fromNode.y + 140;
     } else if (conditionLabel === 'No') {
-      newX = isHorizontal ? fromNode.x + 220 : fromNode.x + 110;
-      newY = isHorizontal ? fromNode.y + 70 : fromNode.y + 130;
+      newX = isHorizontal ? fromNode.x + 230 : fromNode.x + 120;
+      newY = isHorizontal ? fromNode.y + 80 : fromNode.y + 140;
     } else {
-      newX = isHorizontal ? fromNode.x + 220 : fromNode.x;
-      newY = isHorizontal ? fromNode.y : fromNode.y + 130;
+      newX = isHorizontal ? fromNode.x + 230 : fromNode.x;
+      newY = isHorizontal ? fromNode.y : fromNode.y + 140;
     }
 
     const nextText = conditionLabel === 'Sí' ? 'Acción Sí' : (conditionLabel === 'No' ? 'Acción No' : 'Siguiente Paso');
@@ -323,7 +391,7 @@
     }
   }
 
-  // --- ROBUST BIDIRECTIONAL PARSER (Verified regex engine) ---
+  // --- ROBUST BIDIRECTIONAL PARSER ---
   function parseAndApplyMermaidCode(code, triggerToast = true) {
     if (!code || !code.trim()) return false;
 
@@ -338,7 +406,6 @@
         return s.trim().replace(/^["']|["']$/g, '').replace(/<br\s*[\/]?>/gi, '\n').trim();
       }
 
-      // Step 1: Detect Direction
       for (let rawLine of lines) {
         let line = rawLine.trim();
         const dirMatch = line.match(/^(?:flowchart|graph)\s+(TD|TB|LR|BT|RL)/i);
@@ -349,7 +416,6 @@
         }
       }
 
-      // Node shape pattern regex: [[...]], ([...]), [(...)], [/...\], {...}, [...]
       const nodeShapeRegex = /([a-zA-Z0-9_]+)\s*(?:(\[\[(.*?)\]\])|(\(\[(.*?)\]\))|(\[\((.*?)\)\])|(\[\/(.*?)\/\])|(\[\\(.*?)\\\])|(\{(.*?)\})|(\[(.*?)\]))/g;
 
       for (let rawLine of lines) {
@@ -359,7 +425,6 @@
         }
         if (/^(?:flowchart|graph)\s+/i.test(line)) continue;
 
-        // Extract shapes on this line
         let match;
         nodeShapeRegex.lastIndex = 0;
         while ((match = nodeShapeRegex.exec(line)) !== null) {
@@ -376,6 +441,8 @@
           else if (match[14] !== undefined) { shape = 'process'; lbl = match[15]; }
 
           lbl = cleanStr(lbl);
+          const shapeDef = SHAPES[shape] || SHAPES.process;
+
           if (!nodesMap.has(nid)) {
             let nodeColor = 'sky';
             if (shape === 'terminal') nodeColor = 'emerald';
@@ -392,20 +459,21 @@
               label: lbl,
               x: existing ? existing.x : 0,
               y: existing ? existing.y : 0,
-              width: shape === 'decision' ? 150 : 140,
-              height: shape === 'decision' ? 60 : 52
+              width: shapeDef.defaultWidth,
+              height: shapeDef.defaultHeight
             });
           } else {
             const n = nodesMap.get(nid);
             if (lbl) n.label = lbl;
-            if (shape !== 'process') n.shape = shape;
+            if (shape !== 'process') {
+              n.shape = shape;
+              n.width = shapeDef.defaultWidth;
+              n.height = shapeDef.defaultHeight;
+            }
           }
         }
 
-        // Normalize line by stripping inline shapes to parse connectors
         const normalized = line.replace(nodeShapeRegex, '$1');
-
-        // Regex for connections
         const connFinder = /([a-zA-Z0-9_]+)\s*(?:(-->|==>|-\.->|---|--\s*["']?(.*?)["']?\s*-->|==\s*["']?(.*?)["']?\s*==>|-\.\s*["']?(.*?)["']?\s*\.->|-->\|(.*?)\||\=\=>\|(.*?)\||\-\.->\|(.*?)\|))\s*([a-zA-Z0-9_]+)/g;
 
         let cm;
@@ -427,7 +495,6 @@
             }
           }
 
-          // Register node if not yet seen
           if (!nodesMap.has(src)) {
             nodesMap.set(src, { id: src, shape: 'process', color: 'sky', label: src, x: 0, y: 0, width: 140, height: 52 });
           }
@@ -452,8 +519,7 @@
       state.direction = detectedDir;
       if (dom.selectDirection) dom.selectDirection.value = detectedDir;
 
-      const parsedNodes = Array.from(nodesMap.values());
-      state.nodes = parsedNodes;
+      state.nodes = Array.from(nodesMap.values());
       state.edges = newEdges;
 
       render();
@@ -466,7 +532,7 @@
       }
 
       if (triggerToast) {
-        showToast(`✨ ${parsedNodes.length} nodos y ${newEdges.length} conexiones importados`);
+        showToast(`✨ ${state.nodes.length} nodos y ${newEdges.length} conexiones importados`);
       }
       return true;
 
@@ -480,7 +546,7 @@
     }
   }
 
-  // --- SMART HIERARCHICAL AUTO-LAYOUT & COLLISION RESOLUTION ---
+  // --- SMART AUTO-LAYOUT & COLLISION RESOLUTION ---
   function autoLayout(animate = true) {
     if (state.nodes.length === 0) return;
 
@@ -544,10 +610,10 @@
       layers[r].push(n);
     });
 
-    const layerSpacing = isHorizontal ? 260 : 130;
-    const nodeSpacing = isHorizontal ? 100 : 210;
+    const layerSpacing = isHorizontal ? 270 : 150;
+    const nodeSpacing = isHorizontal ? 120 : 230;
     const startX = 140;
-    const startY = 110; // Extra clearance for floating dock
+    const startY = 110;
 
     const targetPositions = {};
 
@@ -572,7 +638,7 @@
     });
 
     // Collision Resolution Pass (AABB Separation)
-    const minGap = 20;
+    const minGap = 24;
     const nodeList = state.nodes.map(n => ({
       id: n.id,
       x: targetPositions[n.id] ? targetPositions[n.id].x : n.x,
@@ -708,7 +774,7 @@
     if (dom.statEdges) dom.statEdges.textContent = `${state.edges.length} conexiones`;
   }
 
-  // --- RENDERING CANVAS ---
+  // --- RENDERING CANVAS (AUTHENTIC SVG VECTOR NODES) ---
   function render() {
     renderNodes();
     renderEdges();
@@ -720,15 +786,27 @@
 
     state.nodes.forEach(node => {
       const shapeDef = SHAPES[node.shape] || SHAPES.process;
+      const w = node.width || shapeDef.defaultWidth;
+      const h = node.height || shapeDef.defaultHeight;
       const isSelected = state.selectedNodeId === node.id;
       const isEditing = state.editingNodeId === node.id;
 
       const nodeEl = document.createElement('div');
-      nodeEl.className = `canvas-node ${shapeDef.className} color-${node.color || 'emerald'} ${isSelected ? 'selected' : ''}`;
+      nodeEl.className = `canvas-node color-${node.color || 'emerald'} ${isSelected ? 'selected' : ''}`;
       nodeEl.style.left = `${node.x}px`;
       nodeEl.style.top = `${node.y}px`;
+      nodeEl.style.width = `${w}px`;
+      nodeEl.style.height = `${h}px`;
       nodeEl.dataset.id = node.id;
 
+      // 1. Pure SVG Vector Graphic Backdrop
+      const svgBg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svgBg.setAttribute('class', 'node-vector-svg');
+      svgBg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      svgBg.innerHTML = shapeDef.generateSvg(w, h);
+      nodeEl.appendChild(svgBg);
+
+      // 2. Overlaid Text Label or Input
       if (isEditing) {
         const input = document.createElement('input');
         input.type = 'text';
@@ -758,6 +836,7 @@
         nodeEl.appendChild(labelDiv);
       }
 
+      // 3. 4 Connection Ports at precise shape edges
       ['top', 'right', 'bottom', 'left'].forEach(portPos => {
         const port = document.createElement('div');
         port.className = `node-port port-${portPos}`;
@@ -785,14 +864,14 @@
 
       const pathStr = calculateSmoothPath(p1, p2, edge.fromPort, edge.toPort);
 
-      // 1. Hit path for smooth clicks
+      // Hit path for smooth clicks
       const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       hitPath.setAttribute('d', pathStr);
       hitPath.setAttribute('class', 'edge-hit-path');
       hitPath.dataset.edgeId = edge.id;
       dom.edgesLayer.appendChild(hitPath);
 
-      // 2. Visible line
+      // Visible line
       const linePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       linePath.setAttribute('d', pathStr);
       linePath.setAttribute('class', `edge-line-path ${edge.style || 'normal'} ${isSelected ? 'selected' : ''}`);
@@ -800,7 +879,7 @@
       linePath.dataset.edgeId = edge.id;
       dom.edgesLayer.appendChild(linePath);
 
-      // 3. Label Badge
+      // Label Badge
       const labelText = (edge.label || '').trim();
       const mid = getPathMidpoint(p1, p2);
 
@@ -837,8 +916,9 @@
   }
 
   function getPortCoordinates(node, port) {
-    const w = node.width || 140;
-    const h = node.height || 52;
+    const shapeDef = SHAPES[node.shape] || SHAPES.process;
+    const w = node.width || shapeDef.defaultWidth;
+    const h = node.height || shapeDef.defaultHeight;
     switch (port) {
       case 'top': return { x: node.x + w / 2, y: node.y };
       case 'bottom': return { x: node.x + w / 2, y: node.y + h };
@@ -893,7 +973,8 @@
       }
     }
 
-    const nodeWidth = node.width || 140;
+    const shapeDef = SHAPES[node.shape] || SHAPES.process;
+    const nodeWidth = node.width || shapeDef.defaultWidth;
     const screenX = (node.x + nodeWidth / 2) * state.zoom + state.pan.x;
     const screenY = node.y * state.zoom + state.pan.y - 44;
 
@@ -1135,7 +1216,8 @@
         const shape = btn.dataset.shape;
         const rect = dom.viewport.getBoundingClientRect();
         const center = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        createNode(shape, center.x - 70, center.y - 26, null, state.activeColor);
+        const shapeDef = SHAPES[shape] || SHAPES.process;
+        createNode(shape, center.x - shapeDef.defaultWidth / 2, center.y - shapeDef.defaultHeight / 2, null, state.activeColor);
       });
     });
 
@@ -1438,12 +1520,12 @@
       auth: {
         direction: 'TD',
         nodes: [
-          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', x: 200, y: 50 },
-          { id: 'B', shape: 'io', color: 'cyan', label: 'Ingresar Credenciales', x: 200, y: 150 },
-          { id: 'C', shape: 'decision', color: 'amber', label: '¿Credenciales Válidas?', x: 200, y: 260 },
-          { id: 'D', shape: 'process', color: 'sky', label: 'Generar Token JWT', x: 80, y: 390 },
-          { id: 'E', shape: 'process', color: 'rose', label: 'Mostrar Error 401', x: 330, y: 390 },
-          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 510 }
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', x: 200, y: 50, width: 140, height: 52 },
+          { id: 'B', shape: 'io', color: 'cyan', label: 'Ingresar Credenciales', x: 200, y: 150, width: 150, height: 52 },
+          { id: 'C', shape: 'decision', color: 'amber', label: '¿Credenciales Válidas?', x: 200, y: 260, width: 160, height: 76 },
+          { id: 'D', shape: 'process', color: 'sky', label: 'Generar Token JWT', x: 80, y: 390, width: 140, height: 52 },
+          { id: 'E', shape: 'process', color: 'rose', label: 'Mostrar Error 401', x: 330, y: 390, width: 140, height: 52 },
+          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 510, width: 140, height: 52 }
         ],
         edges: [
           { id: 'e1', from: 'A', to: 'B', style: 'normal' },
@@ -1457,12 +1539,12 @@
       payment: {
         direction: 'TD',
         nodes: [
-          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Checkout Carrito', x: 200, y: 50 },
-          { id: 'B', shape: 'decision', color: 'amber', label: '¿Tarjeta Válida?', x: 200, y: 160 },
-          { id: 'C', shape: 'subroutine', color: 'purple', label: 'Pasarela Stripe', x: 80, y: 290 },
-          { id: 'D', shape: 'process', color: 'rose', label: 'Rechazar Pago', x: 340, y: 290 },
-          { id: 'E', shape: 'database', color: 'purple', label: 'Guardar Orden en DB', x: 80, y: 410 },
-          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 530 }
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Checkout Carrito', x: 200, y: 50, width: 140, height: 52 },
+          { id: 'B', shape: 'decision', color: 'amber', label: '¿Tarjeta Válida?', x: 200, y: 160, width: 160, height: 76 },
+          { id: 'C', shape: 'subroutine', color: 'purple', label: 'Pasarela Stripe', x: 80, y: 290, width: 150, height: 52 },
+          { id: 'D', shape: 'process', color: 'rose', label: 'Rechazar Pago', x: 340, y: 290, width: 140, height: 52 },
+          { id: 'E', shape: 'database', color: 'purple', label: 'Guardar Orden en DB', x: 80, y: 410, width: 140, height: 64 },
+          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 530, width: 140, height: 52 }
         ],
         edges: [
           { id: 'ep1', from: 'A', to: 'B', style: 'normal' },
@@ -1476,12 +1558,12 @@
       etl: {
         direction: 'LR',
         nodes: [
-          { id: 'A', shape: 'database', color: 'purple', label: 'Fuente CSV / API', x: 50, y: 150 },
-          { id: 'B', shape: 'process', color: 'sky', label: 'Extracción Datos', x: 250, y: 150 },
-          { id: 'C', shape: 'decision', color: 'amber', label: '¿Schema Válido?', x: 450, y: 150 },
-          { id: 'D', shape: 'process', color: 'emerald', label: 'Transformar', x: 680, y: 100 },
-          { id: 'E', shape: 'database', color: 'rose', label: 'Dead Letter Queue', x: 680, y: 230 },
-          { id: 'F', shape: 'database', color: 'purple', label: 'Data Warehouse', x: 920, y: 100 }
+          { id: 'A', shape: 'database', color: 'purple', label: 'Fuente CSV / API', x: 50, y: 150, width: 140, height: 64 },
+          { id: 'B', shape: 'process', color: 'sky', label: 'Extracción Datos', x: 250, y: 150, width: 140, height: 52 },
+          { id: 'C', shape: 'decision', color: 'amber', label: '¿Schema Válido?', x: 450, y: 150, width: 160, height: 76 },
+          { id: 'D', shape: 'process', color: 'emerald', label: 'Transformar', x: 680, y: 100, width: 140, height: 52 },
+          { id: 'E', shape: 'database', color: 'rose', label: 'Dead Letter Queue', x: 680, y: 230, width: 140, height: 64 },
+          { id: 'F', shape: 'database', color: 'purple', label: 'Data Warehouse', x: 920, y: 100, width: 140, height: 64 }
         ],
         edges: [
           { id: 'ee1', from: 'A', to: 'B', style: 'normal' },
