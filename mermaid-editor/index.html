@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MermaidFlow Studio - Editor Visual de Diagramas de Flujo</title>
   <link rel="stylesheet" href="styles.css">
-  <!-- Mermaid.js para renderizado en vivo (cuando hay conexión) -->
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 
@@ -22,7 +20,7 @@
 
     <!-- Center Quick Actions -->
     <div class="header-center">
-      <button id="btn-auto-layout" class="btn-primary" title="Ordenar automáticamente los nodos sin cruces">
+      <button id="btn-auto-layout" class="btn-primary" title="Ordenar automáticamente los nodos y ramas">
         <span>⚡ Auto-Organizar</span>
       </button>
 
@@ -35,7 +33,7 @@
 
       <select id="select-template" title="Cargar plantilla de ejemplo">
         <option value="">📂 Plantillas...</option>
-        <option value="auth">🔐 Autenticación y Token JWT</option>
+        <option value="auth">🔐 Autenticación & Token JWT</option>
         <option value="payment">💳 Pasarela de Pago & Checkout</option>
         <option value="etl">📊 Pipeline de Datos (ETL)</option>
       </select>
@@ -56,10 +54,10 @@
 
     <!-- Left Sidebar: Node Shapes Palette -->
     <aside class="sidebar-palette">
-      <div class="sidebar-title">Formas de Flujo</div>
+      <div class="sidebar-title">Formas Mermaid</div>
       
       <div class="palette-items">
-        <div class="palette-card" data-type="terminal" title="Clic para añadir">
+        <div class="palette-card" data-type="terminal" title="Clic para agregar al lienzo">
           <div class="palette-shape-icon">
             <div class="shape-preview-terminal"></div>
           </div>
@@ -69,7 +67,7 @@
           </div>
         </div>
 
-        <div class="palette-card" data-type="process" title="Clic para añadir">
+        <div class="palette-card" data-type="process" title="Clic para agregar al lienzo">
           <div class="palette-shape-icon">
             <div class="shape-preview-process"></div>
           </div>
@@ -79,7 +77,7 @@
           </div>
         </div>
 
-        <div class="palette-card" data-type="decision" title="Clic para añadir">
+        <div class="palette-card" data-type="decision" title="Clic para agregar al lienzo">
           <div class="palette-shape-icon">
             <div class="shape-preview-decision"></div>
           </div>
@@ -89,7 +87,7 @@
           </div>
         </div>
 
-        <div class="palette-card" data-type="database" title="Clic para añadir">
+        <div class="palette-card" data-type="database" title="Clic para agregar al lienzo">
           <div class="palette-shape-icon">
             <div class="shape-preview-database"></div>
           </div>
@@ -99,7 +97,7 @@
           </div>
         </div>
 
-        <div class="palette-card" data-type="io" title="Clic para añadir">
+        <div class="palette-card" data-type="io" title="Clic para agregar al lienzo">
           <div class="palette-shape-icon">
             <div class="shape-preview-io"></div>
           </div>
@@ -109,7 +107,7 @@
           </div>
         </div>
 
-        <div class="palette-card" data-type="subroutine" title="Clic para añadir">
+        <div class="palette-card" data-type="subroutine" title="Clic para agregar al lienzo">
           <div class="palette-shape-icon">
             <div class="shape-preview-subroutine"></div>
           </div>
@@ -121,11 +119,10 @@
       </div>
 
       <div class="sidebar-footer">
-        <div>💡 <b>Atajos:</b></div>
-        <div>• <b>Doble clic:</b> Nuevo proceso o editar texto</div>
-        <div>• <b>Arrastrar puntos:</b> Conectar nodos</div>
-        <div>• <b>Supr / Backspace:</b> Borrar</div>
-        <div>• <b>Ctrl+Z / Ctrl+Y:</b> Deshacer / Rehacer</div>
+        <div>💡 <b>Creación rápida:</b></div>
+        <div>• <b>Selecciona un rombo:</b> Clic en <b>+ Sí</b> o <b>+ No</b> para ramificar.</div>
+        <div>• <b>Doble clic en nodo:</b> Editar texto.</div>
+        <div>• <b>Clic en flecha:</b> Cambiar condición (Sí, No, OK).</div>
       </div>
     </aside>
 
@@ -150,68 +147,60 @@
         <div id="nodes-layer"></div>
       </div>
 
-      <!-- Edge Inspector Popover (Floating) -->
+      <!-- Edge Floating Inspector Popover -->
       <div class="edge-popover" id="edge-popover">
-        <label>Etiqueta de Conexión</label>
-        <input type="text" id="edge-label-input" placeholder="Ej: Sí, No, Error..." />
-        
-        <div class="chip-container">
-          <span class="chip" data-val="Sí">Sí</span>
-          <span class="chip" data-val="No">No</span>
-          <span class="chip" data-val="OK">OK</span>
-          <span class="chip" data-val="Error">Error</span>
-          <span class="chip" data-val="Default">Default</span>
+        <div class="edge-popover-title">
+          <span>Condición de la Flecha</span>
+          <button id="btn-delete-edge" class="action-btn btn-del" style="padding: 2px 6px;" title="Borrar flecha">🗑️</button>
         </div>
 
-        <label style="margin-top: 4px;">Estilo de Flecha</label>
+        <div class="quick-conditions">
+          <button class="condition-pill pill-yes" data-val="Sí">🟢 Sí</button>
+          <button class="condition-pill pill-no" data-val="No">🔴 No</button>
+          <button class="condition-pill pill-ok" data-val="OK">🔵 OK</button>
+          <button class="condition-pill pill-none" data-val="">⚪ Ninguna</button>
+        </div>
+
+        <input type="text" id="edge-label-input" placeholder="O escribe texto libre..." />
+
         <select id="edge-style-select">
-          <option value="normal">Normal (-->)</option>
-          <option value="dotted">Punteada (-.->)</option>
-          <option value="thick">Gruesa (==>)</option>
-          <option value="open">Sin flecha (---)</option>
+          <option value="normal">Flecha Normal (-->)</option>
+          <option value="thick">Flecha Gruesa (==>)</option>
+          <option value="dotted">Línea Punteada (-.->)</option>
+          <option value="open">Línea Simple (---)</option>
         </select>
       </div>
 
       <!-- Bottom Floating Canvas Controls -->
       <div class="canvas-controls">
-        <button id="btn-zoom-out" class="btn-ghost" title="Alejar (-)">−</button>
+        <button id="btn-zoom-out" class="btn-ghost" title="Alejar (−)">−</button>
         <span class="zoom-indicator" id="zoom-level">100%</span>
         <button id="btn-zoom-in" class="btn-ghost" title="Acercar (+)">+</button>
         <button id="btn-zoom-reset" class="btn-ghost" title="Restablecer Zoom (100%)">⟲</button>
       </div>
     </main>
 
-    <!-- Right Sidebar: Mermaid Code & Live Preview -->
+    <!-- Right Sidebar: Live Mermaid Code -->
     <aside class="sidebar-code">
       <div class="code-header">
         <div class="code-header-title">
-          <span>Código Mermaid</span>
-        </div>
-        <div class="code-tabs">
-          <button class="code-tab active" id="tab-code">Código</button>
-          <button class="code-tab" id="tab-preview">Previsualización</button>
+          <span>Código Mermaid en Vivo</span>
         </div>
       </div>
 
       <div class="code-content-wrapper">
         <textarea id="mermaid-code" class="code-textarea" readonly spellcheck="false"></textarea>
-        <div id="mermaid-preview" class="mermaid-preview-container"></div>
       </div>
 
       <div class="code-footer">
         <div class="quick-stats">
           <span id="node-count">0 nodos</span>
           <span id="edge-count">0 conexiones</span>
-          <span>Sintaxis v10</span>
+          <span>Sintaxis Mermaid v10</span>
         </div>
-        <div style="display: flex; gap: 8px;">
-          <button id="btn-export-mmd" class="btn-ghost" style="flex: 1; justify-content: center;" title="Descargar archivo de texto .mmd">
-            💾 Guardar .mmd
-          </button>
-          <button id="btn-export-svg" class="btn-ghost" style="flex: 1; justify-content: center;" title="Descargar como gráfico SVG">
-            🖼️ SVG
-          </button>
-        </div>
+        <button id="btn-export-mmd" class="btn-ghost" style="width: 100%; justify-content: center;" title="Descargar archivo .mmd">
+          💾 Descargar Archivo .mmd
+        </button>
       </div>
     </aside>
 

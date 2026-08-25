@@ -1,6 +1,5 @@
 /**
- * MermaidFlow Studio - Core Application Logic
- * Interactive Visual Flowchart to Mermaid Generator with Auto-Layout
+ * MermaidFlow Studio - Native Visual Flowchart & Mermaid Code Generator
  */
 
 (function () {
@@ -47,7 +46,6 @@
     edgesGroup: document.getElementById('edges-group'),
     tempEdge: document.getElementById('temp-edge'),
     mermaidCode: document.getElementById('mermaid-code'),
-    mermaidPreview: document.getElementById('mermaid-preview'),
     copyBtn: document.getElementById('btn-copy'),
     autoLayoutBtn: document.getElementById('btn-auto-layout'),
     directionSelect: document.getElementById('select-direction'),
@@ -60,23 +58,20 @@
     themeToggleBtn: document.getElementById('btn-theme-toggle'),
     templateSelect: document.getElementById('select-template'),
     clearBtn: document.getElementById('btn-clear'),
-    exportSvgBtn: document.getElementById('btn-export-svg'),
     exportMmdBtn: document.getElementById('btn-export-mmd'),
     toastContainer: document.getElementById('toast-container'),
     edgePopover: document.getElementById('edge-popover'),
     edgeLabelInput: document.getElementById('edge-label-input'),
     edgeStyleSelect: document.getElementById('edge-style-select'),
-    tabCode: document.getElementById('tab-code'),
-    tabPreview: document.getElementById('tab-preview')
+    btnDeleteEdge: document.getElementById('btn-delete-edge')
   };
 
   // --- INITIALIZATION ---
   function init() {
     loadTheme();
     setupEventListeners();
-    setupPaletteDrag();
-    
-    // Load from local storage or load default template
+    setupPaletteClicks();
+
     if (!loadFromLocalStorage()) {
       loadTemplate('auth');
     }
@@ -84,8 +79,7 @@
     updateTransform();
     render();
     saveState();
-    
-    // Auto-organize on initial load for a pristine first impression
+
     setTimeout(() => {
       autoLayout(false);
     }, 100);
@@ -93,7 +87,6 @@
 
   // --- LOCAL STORAGE & HISTORY ---
   function saveState() {
-    // Record in history stack
     const snapshot = JSON.stringify({
       nodes: state.nodes,
       edges: state.edges,
@@ -106,11 +99,10 @@
     state.history.push(snapshot);
     state.historyIndex++;
 
-    // Persist in localStorage
     try {
       localStorage.setItem('mermaidflow_data', snapshot);
     } catch (e) {
-      console.warn('LocalStorage full or disabled', e);
+      console.warn('LocalStorage error', e);
     }
 
     updateMermaidCode();
@@ -121,7 +113,7 @@
     if (state.historyIndex > 0) {
       state.historyIndex--;
       restoreSnapshot(state.history[state.historyIndex]);
-      showToast('Deshacer (Undo)');
+      showToast('↩️ Deshacer');
     }
   }
 
@@ -129,7 +121,7 @@
     if (state.historyIndex < state.history.length - 1) {
       state.historyIndex++;
       restoreSnapshot(state.history[state.historyIndex]);
-      showToast('Rehacer (Redo)');
+      showToast('↪️ Rehacer');
     }
   }
 
@@ -147,7 +139,7 @@
       updateMermaidCode();
       updateStats();
     } catch (e) {
-      console.error('Failed to restore snapshot', e);
+      console.error(e);
     }
   }
 
@@ -181,29 +173,28 @@
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', state.theme);
     localStorage.setItem('mermaidflow_theme', state.theme);
-    showToast(state.theme === 'dark' ? 'Modo Oscuro Activado' : 'Modo Claro Activado');
+    showToast(state.theme === 'dark' ? 'Modo Oscuro' : 'Modo Claro');
   }
 
-  // --- NODE & EDGE CREATION ---
-  let nextNodeCounter = 1;
-
+  // --- NODE & EDGE OPERATIONS ---
   function createNode(type, x, y, label = null) {
     const typeDef = NODE_TYPES[type] || NODE_TYPES.process;
     
-    // Generate clean ID: A, B, C... or N1, N2
-    let nodeLetter = String.fromCharCode(65 + ((state.nodes.length) % 26));
-    if (state.nodes.some(n => n.id === nodeLetter)) {
-      nodeLetter = `Node_${Date.now().toString(36).slice(-4).toUpperCase()}`;
+    let idCandidate = `N${state.nodes.length + 1}`;
+    let counter = 1;
+    while (state.nodes.some(n => n.id === idCandidate)) {
+      counter++;
+      idCandidate = `N${counter}`;
     }
 
     const node = {
-      id: nodeLetter,
+      id: idCandidate,
       type: type,
       label: label || typeDef.defaultText,
       x: Math.round(x),
       y: Math.round(y),
       width: type === 'decision' ? 160 : 150,
-      height: type === 'decision' ? 64 : 56
+      height: type === 'decision' ? 66 : 56
     };
 
     state.nodes.push(node);
@@ -217,9 +208,8 @@
   }
 
   function createEdge(fromNodeId, toNodeId, fromPort = 'bottom', toPort = 'top', label = '', style = 'normal') {
-    if (fromNodeId === toNodeId) return null; // Avoid trivial self loops for clean UI
+    if (fromNodeId === toNodeId) return null;
 
-    // Check if edge already exists
     const exists = state.edges.some(e => e.from === fromNodeId && e.to === toNodeId);
     if (exists) return null;
 
@@ -230,7 +220,7 @@
       fromPort: fromPort,
       toPort: toPort,
       label: label,
-      style: style // normal (-->), dotted (-.->), thick (==>), open (---)
+      style: style
     };
 
     state.edges.push(edge);
@@ -239,7 +229,46 @@
 
     render();
     saveState();
+
+    // If connecting from a decision node and no label set yet, show condition popover automatically
+    const fromNode = state.nodes.find(n => n.id === fromNodeId);
+    if (fromNode && fromNode.type === 'decision' && !label) {
+      setTimeout(() => {
+        showEdgePopoverForEdge(edge);
+      }, 50);
+    }
+
     return edge;
+  }
+
+  // Quick Smart Append (adds connected child node in 1 click)
+  function quickAddBranch(fromNodeId, conditionLabel = '') {
+    const fromNode = state.nodes.find(n => n.id === fromNodeId);
+    if (!fromNode) return;
+
+    const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
+    let newX = fromNode.x;
+    let newY = fromNode.y;
+
+    if (conditionLabel === 'Sí') {
+      newX = isHorizontal ? fromNode.x + 220 : fromNode.x - 120;
+      newY = isHorizontal ? fromNode.y - 80 : fromNode.y + 130;
+    } else if (conditionLabel === 'No') {
+      newX = isHorizontal ? fromNode.x + 220 : fromNode.x + 120;
+      newY = isHorizontal ? fromNode.y + 80 : fromNode.y + 130;
+    } else {
+      newX = isHorizontal ? fromNode.x + 220 : fromNode.x;
+      newY = isHorizontal ? fromNode.y : fromNode.y + 130;
+    }
+
+    const nextType = fromNode.type === 'terminal' && fromNode.label.toLowerCase().includes('fin') ? 'process' : 'process';
+    const nextText = conditionLabel === 'Sí' ? 'Acción Sí' : (conditionLabel === 'No' ? 'Acción No' : 'Siguiente Paso');
+
+    const newNode = createNode(nextType, newX, newY, nextText);
+    createEdge(fromNode.id, newNode.id, 'bottom', 'top', conditionLabel, 'normal');
+    
+    // Smooth Auto-Layout to keep the whole tree neat
+    autoLayout(true);
   }
 
   function deleteSelected() {
@@ -261,43 +290,36 @@
     if (changed) {
       render();
       saveState();
+      showToast('Elemento eliminado');
     }
   }
 
-  // --- AUTO-LAYOUT ENGINE (Sugiyama / Dagre-style Hierarchical Algorithm) ---
+  // --- SMART AUTO-LAYOUT ENGINE ---
   function autoLayout(animate = true) {
     if (state.nodes.length === 0) return;
-
-    showToast('⚡ Auto-organizando diagrama...');
 
     const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
     const isReversed = state.direction === 'BT' || state.direction === 'RL';
 
-    // 1. Build adjacency list and in-degrees
     const inDegree = {};
     const adj = {};
-    const revAdj = {};
     
     state.nodes.forEach(n => {
       inDegree[n.id] = 0;
       adj[n.id] = [];
-      revAdj[n.id] = [];
     });
 
     state.edges.forEach(e => {
       if (adj[e.from] && inDegree[e.to] !== undefined) {
         adj[e.from].push(e.to);
-        revAdj[e.to].push(e.from);
         inDegree[e.to] = (inDegree[e.to] || 0) + 1;
       }
     });
 
-    // 2. Assign Ranks (Layers) using Topological Sort / Longest Path
     const ranks = {};
-    const visited = new Set();
     const queue = [];
 
-    // Find root nodes
+    // Root nodes
     state.nodes.forEach(n => {
       if (inDegree[n.id] === 0) {
         ranks[n.id] = 0;
@@ -305,14 +327,13 @@
       }
     });
 
-    // If graph has cycles and no in-degree 0 nodes, pick the first node
     if (queue.length === 0 && state.nodes.length > 0) {
       ranks[state.nodes[0].id] = 0;
       queue.push(state.nodes[0].id);
     }
 
-    // Assign layers with BFS / relaxation
     let maxRank = 0;
+    const visited = new Set();
     while (queue.length > 0) {
       const u = queue.shift();
       visited.add(u);
@@ -330,54 +351,47 @@
       });
     }
 
-    // Handle any unvisited disconnected nodes
     state.nodes.forEach(n => {
-      if (ranks[n.id] === undefined) {
-        ranks[n.id] = 0;
-      }
+      if (ranks[n.id] === undefined) ranks[n.id] = 0;
     });
 
-    // 3. Group nodes by rank
     const layers = [];
     for (let r = 0; r <= maxRank; r++) {
       layers[r] = [];
     }
     state.nodes.forEach(n => {
       const r = ranks[n.id] || 0;
-      if (!layers[r]) layers[r] = [];
       layers[r].push(n);
     });
 
-    // 4. Calculate Coordinates
     const layerSpacing = isHorizontal ? 260 : 130;
-    const nodeSpacing = isHorizontal ? 100 : 200;
-    const startX = 120;
-    const startY = 100;
+    const nodeSpacing = isHorizontal ? 100 : 210;
+    const startX = 140;
+    const startY = 90;
 
     const targetPositions = {};
 
     layers.forEach((layerNodes, r) => {
       const layerIndex = isReversed ? (layers.length - 1 - r) : r;
-      const totalWidth = (layerNodes.length - 1) * nodeSpacing;
+      const totalSpan = (layerNodes.length - 1) * nodeSpacing;
       
       layerNodes.forEach((node, i) => {
-        const offset = (i * nodeSpacing) - (totalWidth / 2);
+        const offset = (i * nodeSpacing) - (totalSpan / 2);
 
         if (isHorizontal) {
           targetPositions[node.id] = {
             x: startX + (layerIndex * layerSpacing),
-            y: startY + 220 + offset
+            y: startY + 240 + offset
           };
         } else {
           targetPositions[node.id] = {
-            x: startX + 350 + offset,
+            x: startX + 360 + offset,
             y: startY + (layerIndex * layerSpacing)
           };
         }
       });
     });
 
-    // 5. Apply positions (with smooth animation or instant)
     if (animate) {
       animateLayout(targetPositions);
     } else {
@@ -394,7 +408,7 @@
 
   function animateLayout(targetPositions) {
     const startTime = performance.now();
-    const duration = 300; // ms
+    const duration = 280;
     const initialPositions = {};
 
     state.nodes.forEach(node => {
@@ -404,7 +418,7 @@
     function step(now) {
       const elapsed = now - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      const ease = easeOutCubic(progress);
+      const ease = 1 - Math.pow(1 - progress, 3);
 
       state.nodes.forEach(node => {
         const initial = initialPositions[node.id];
@@ -427,20 +441,16 @@
     requestAnimationFrame(step);
   }
 
-  function easeOutCubic(x) {
-    return 1 - Math.pow(1 - x, 3);
-  }
-
   // --- MERMAID GENERATOR (SERIALIZER) ---
   function generateMermaidCode() {
     if (state.nodes.length === 0) {
-      return `flowchart ${state.direction}\n    %% Lienzo vacío - Agrega nodos desde la izquierda`;
+      return `flowchart ${state.direction}\n    %% Lienzo vacío`;
     }
 
     let code = `flowchart ${state.direction}\n`;
 
     // 1. Declare Nodes
-    code += `    %% Nodos y Formas\n`;
+    code += `    %% Nodos\n`;
     state.nodes.forEach(node => {
       const typeDef = NODE_TYPES[node.type] || NODE_TYPES.process;
       const cleanLabel = (node.label || 'Nodo')
@@ -450,7 +460,7 @@
       code += `    ${node.id}${typeDef.prefix}"${cleanLabel}"${typeDef.suffix}\n`;
     });
 
-    // 2. Declare Connections & Edges
+    // 2. Declare Edges
     if (state.edges.length > 0) {
       code += `\n    %% Conexiones\n`;
       state.edges.forEach(edge => {
@@ -459,12 +469,13 @@
         else if (edge.style === 'thick') connector = '==>';
         else if (edge.style === 'open') connector = '---';
 
-        if (edge.label && edge.label.trim()) {
-          const cleanEdgeLabel = edge.label.trim().replace(/"/g, "'");
-          if (edge.style === 'normal') {
-            code += `    ${edge.from} -- "${cleanEdgeLabel}" --> ${edge.to}\n`;
+        const label = (edge.label || '').trim();
+        if (label) {
+          const cleanLabel = label.replace(/"/g, "'");
+          if (edge.style === 'normal' || !edge.style) {
+            code += `    ${edge.from} -- "${cleanLabel}" --> ${edge.to}\n`;
           } else {
-            code += `    ${edge.from} ${connector}|"${cleanEdgeLabel}"| ${edge.to}\n`;
+            code += `    ${edge.from} ${connector}|"${cleanLabel}"| ${edge.to}\n`;
           }
         } else {
           code += `    ${edge.from} ${connector} ${edge.to}\n`;
@@ -479,38 +490,6 @@
     const code = generateMermaidCode();
     if (dom.mermaidCode) {
       dom.mermaidCode.value = code;
-    }
-    renderMermaidPreview(code);
-  }
-
-  function renderMermaidPreview(code) {
-    if (!dom.mermaidPreview) return;
-    
-    // Check if mermaid global is loaded
-    if (window.mermaid) {
-      try {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          theme: state.theme === 'dark' ? 'dark' : 'default',
-          securityLevel: 'loose',
-          flowchart: { curve: 'basis' }
-        });
-        
-        window.mermaid.render('mermaid-svg-render-' + Date.now(), code)
-          .then(result => {
-            dom.mermaidPreview.innerHTML = result.svg;
-          })
-          .catch(err => {
-            dom.mermaidPreview.innerHTML = `<div style="color:#ef4444;font-size:12px;padding:20px;">Sintaxis en proceso...</div>`;
-          });
-      } catch (e) {
-        dom.mermaidPreview.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:20px;">Vista previa lista al conectar.</div>`;
-      }
-    } else {
-      dom.mermaidPreview.innerHTML = `<div style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px;">
-        <p style="font-weight:600;margin-bottom:6px;">Código Mermaid Listo</p>
-        <p style="font-size:11px;">Copia el código directamente a Obsidian, GitHub o Notion.</p>
-      </div>`;
     }
   }
 
@@ -535,15 +514,25 @@
       nodeEl.style.top = `${node.y}px`;
       nodeEl.dataset.id = node.id;
 
-      // Quick Toolbar for selected node
-      const toolbar = document.createElement('div');
-      toolbar.className = 'node-toolbar';
-      toolbar.innerHTML = `
-        <button class="node-toolbar-btn btn-duplicate" title="Duplicar">📑</button>
-        <button class="node-toolbar-btn btn-change-type" title="Cambiar Forma">🔄</button>
-        <button class="node-toolbar-btn btn-delete" title="Eliminar (Supr)">🗑️</button>
-      `;
-      nodeEl.appendChild(toolbar);
+      // Smart Action Buttons when Node is Selected
+      const actions = document.createElement('div');
+      actions.className = 'node-actions';
+
+      if (node.type === 'decision') {
+        // Quick + Sí / + No branches for decisions
+        actions.innerHTML = `
+          <button class="action-btn btn-quick-yes" data-action="quick-yes">🟢 + Sí</button>
+          <button class="action-btn btn-quick-no" data-action="quick-no">🔴 + No</button>
+          <button class="action-btn btn-del" data-action="delete" title="Borrar">🗑️</button>
+        `;
+      } else {
+        // Quick + Next step for regular nodes
+        actions.innerHTML = `
+          <button class="action-btn btn-quick-next" data-action="quick-next">➕ + Siguiente</button>
+          <button class="action-btn btn-del" data-action="delete" title="Borrar">🗑️</button>
+        `;
+      }
+      nodeEl.appendChild(actions);
 
       // Node Content (Text or Input)
       if (isEditing) {
@@ -573,7 +562,7 @@
         nodeEl.appendChild(content);
       }
 
-      // Magnetic Ports (Top, Right, Bottom, Left)
+      // 4 Magnetic Connection Ports
       ['top', 'right', 'bottom', 'left'].forEach(portPos => {
         const port = document.createElement('div');
         port.className = `port port-${portPos}`;
@@ -601,34 +590,48 @@
 
       const pathData = calculateSmoothPath(p1, p2, edge.fromPort, edge.toPort);
 
+      // Invisible fat hit area for easy clicking
+      const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      hitPath.setAttribute('d', pathData);
+      hitPath.setAttribute('class', 'edge-hit-area');
+      hitPath.dataset.edgeId = edge.id;
+      dom.edgesGroup.appendChild(hitPath);
+
+      // Visible stroke
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', pathData);
       path.setAttribute('class', `edge-path ${edge.style || 'normal'} ${isSelected ? 'selected' : ''}`);
       path.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
       path.dataset.edgeId = edge.id;
-
       dom.edgesGroup.appendChild(path);
 
       // Render Edge Label if present
-      if (edge.label && edge.label.trim()) {
-        const midPoint = getPathMidpoint(p1, p2);
-        const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        labelGroup.setAttribute('class', 'edge-label-group');
-        labelGroup.dataset.edgeId = edge.id;
+      const labelText = (edge.label || '').trim();
+      const midPoint = getPathMidpoint(p1, p2);
 
-        const textLen = edge.label.length * 7 + 16;
+      const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      labelGroup.setAttribute('class', 'edge-label-group');
+      labelGroup.dataset.edgeId = edge.id;
+
+      let labelClass = 'edge-label-bg';
+      if (labelText.toLowerCase() === 'sí' || labelText.toLowerCase() === 'si') labelClass += ' label-yes';
+      if (labelText.toLowerCase() === 'no') labelClass += ' label-no';
+
+      const displayStr = labelText || (isSelected ? '+ Condición' : '');
+      if (displayStr) {
+        const textLen = Math.max(displayStr.length * 8 + 18, 38);
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', midPoint.x - textLen / 2);
-        rect.setAttribute('y', midPoint.y - 11);
+        rect.setAttribute('y', midPoint.y - 12);
         rect.setAttribute('width', textLen);
-        rect.setAttribute('height', 22);
-        rect.setAttribute('class', 'edge-label-bg');
+        rect.setAttribute('height', 24);
+        rect.setAttribute('class', labelClass);
 
         const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         text.setAttribute('x', midPoint.x);
         text.setAttribute('y', midPoint.y);
         text.setAttribute('class', 'edge-label-text');
-        text.textContent = edge.label;
+        text.textContent = displayStr;
 
         labelGroup.appendChild(rect);
         labelGroup.appendChild(text);
@@ -682,19 +685,16 @@
 
   // --- EVENT LISTENERS ---
   function setupEventListeners() {
-    // Window Resize
     window.addEventListener('resize', updateTransform);
-
-    // Keyboard Shortcuts
     window.addEventListener('keydown', handleKeyboardShortcuts);
 
-    // Canvas Pan & Zoom
+    // Canvas Events
     dom.canvasWrapper.addEventListener('wheel', handleWheel, { passive: false });
     dom.canvasWrapper.addEventListener('mousedown', handleCanvasMouseDown);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
 
-    // Double click canvas to create a node
+    // Double click on canvas background -> Quick Process Node
     dom.canvasWrapper.addEventListener('dblclick', (e) => {
       if (e.target === dom.canvasWrapper || e.target.id === 'svg-layer' || e.target.id === 'graph-canvas') {
         const pt = screenToCanvas(e.clientX, e.clientY);
@@ -702,17 +702,9 @@
       }
     });
 
-    // Copy Mermaid Button
-    if (dom.copyBtn) {
-      dom.copyBtn.addEventListener('click', copyMermaidCode);
-    }
-
-    // Auto-Layout Button
-    if (dom.autoLayoutBtn) {
-      dom.autoLayoutBtn.addEventListener('click', () => autoLayout(true));
-    }
-
-    // Direction Select
+    // Top Bar Actions
+    if (dom.copyBtn) dom.copyBtn.addEventListener('click', copyMermaidCode);
+    if (dom.autoLayoutBtn) dom.autoLayoutBtn.addEventListener('click', () => autoLayout(true));
     if (dom.directionSelect) {
       dom.directionSelect.addEventListener('change', (e) => {
         state.direction = e.target.value;
@@ -721,7 +713,6 @@
       });
     }
 
-    // Zoom Controls
     if (dom.zoomInBtn) dom.zoomInBtn.addEventListener('click', () => setZoom(state.zoom + 0.15));
     if (dom.zoomOutBtn) dom.zoomOutBtn.addEventListener('click', () => setZoom(state.zoom - 0.15));
     if (dom.zoomResetBtn) dom.zoomResetBtn.addEventListener('click', () => {
@@ -730,10 +721,8 @@
       updateTransform();
     });
 
-    // Theme Toggle
     if (dom.themeToggleBtn) dom.themeToggleBtn.addEventListener('click', toggleTheme);
 
-    // Templates
     if (dom.templateSelect) {
       dom.templateSelect.addEventListener('change', (e) => {
         if (e.target.value) {
@@ -743,7 +732,6 @@
       });
     }
 
-    // Clear Canvas
     if (dom.clearBtn) {
       dom.clearBtn.addEventListener('click', () => {
         if (confirm('¿Limpiar todo el lienzo?')) {
@@ -759,28 +747,42 @@
       });
     }
 
-    // Export Buttons
-    if (dom.exportSvgBtn) dom.exportSvgBtn.addEventListener('click', exportSvg);
     if (dom.exportMmdBtn) dom.exportMmdBtn.addEventListener('click', exportMmd);
 
-    // Tabs in code panel
-    if (dom.tabCode && dom.tabPreview) {
-      dom.tabCode.addEventListener('click', () => {
-        dom.tabCode.classList.add('active');
-        dom.tabPreview.classList.remove('active');
-        dom.mermaidCode.style.display = 'block';
-        dom.mermaidPreview.classList.remove('active');
-      });
-      dom.tabPreview.addEventListener('click', () => {
-        dom.tabPreview.classList.add('active');
-        dom.tabCode.classList.remove('active');
-        dom.mermaidCode.style.display = 'none';
-        dom.mermaidPreview.classList.add('active');
-        renderMermaidPreview(generateMermaidCode());
-      });
-    }
+    // Edge Popover Controls (DIRECT EVENT BINDINGS)
+    setupEdgePopoverEvents();
+  }
 
-    // Edge Popover Inputs
+  function setupPaletteClicks() {
+    const paletteCards = document.querySelectorAll('.palette-card');
+    paletteCards.forEach(card => {
+      card.addEventListener('click', () => {
+        const rect = dom.canvasWrapper.getBoundingClientRect();
+        const center = screenToCanvas(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        createNode(card.dataset.type, center.x - 75, center.y - 28);
+      });
+    });
+  }
+
+  function setupEdgePopoverEvents() {
+    // Condition Pills (Sí, No, OK, Sin Etiqueta)
+    const pills = document.querySelectorAll('.condition-pill');
+    pills.forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = pill.dataset.val;
+        const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
+        if (edge) {
+          edge.label = val;
+          if (dom.edgeLabelInput) dom.edgeLabelInput.value = val;
+          render();
+          saveState();
+          showToast(`Condición: "${val || 'Ninguna'}"`);
+        }
+      });
+    });
+
+    // Custom Label Input
     if (dom.edgeLabelInput) {
       dom.edgeLabelInput.addEventListener('input', (e) => {
         const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
@@ -792,6 +794,7 @@
       });
     }
 
+    // Arrow Style Select
     if (dom.edgeStyleSelect) {
       dom.edgeStyleSelect.addEventListener('change', (e) => {
         const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
@@ -803,36 +806,18 @@
       });
     }
 
-    // Condition Chips
-    document.querySelectorAll('.chip').forEach(chip => {
-      chip.addEventListener('click', () => {
-        const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
-        if (edge) {
-          edge.label = chip.dataset.val;
-          if (dom.edgeLabelInput) dom.edgeLabelInput.value = edge.label;
-          render();
-          saveState();
-        }
+    // Delete Edge Button
+    if (dom.btnDeleteEdge) {
+      dom.btnDeleteEdge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSelected();
       });
-    });
+    }
   }
 
-  // --- DRAG & DROP PALETTE ---
-  function setupPaletteDrag() {
-    const paletteCards = document.querySelectorAll('.palette-card');
-    paletteCards.forEach(card => {
-      card.addEventListener('click', () => {
-        // Add node at center of current view
-        const rect = dom.canvasWrapper.getBoundingClientRect();
-        const center = screenToCanvas(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        createNode(card.dataset.type, center.x - 75, center.y - 28);
-      });
-    });
-  }
-
-  // --- MOUSE & TOUCH INTERACTION ---
+  // --- MOUSE & TOUCH HANDLERS ---
   function handleCanvasMouseDown(e) {
-    // 1. Check if clicking on node port (start edge connection)
+    // 1. Click on connection port (start edge)
     if (e.target.classList.contains('port')) {
       e.stopPropagation();
       const nodeId = e.target.dataset.nodeId;
@@ -848,34 +833,33 @@
       return;
     }
 
-    // 2. Check if clicking on node toolbar button
-    if (e.target.closest('.node-toolbar-btn')) {
+    // 2. Click on Node Action Buttons (+ Sí, + No, + Siguiente, Borrar)
+    const actionBtn = e.target.closest('.action-btn');
+    if (actionBtn) {
       e.stopPropagation();
-      const btn = e.target.closest('.node-toolbar-btn');
+      const action = actionBtn.dataset.action;
       const node = state.nodes.find(n => n.id === state.selectedNodeId);
       if (!node) return;
 
-      if (btn.classList.contains('btn-delete')) {
+      if (action === 'quick-yes') {
+        quickAddBranch(node.id, 'Sí');
+      } else if (action === 'quick-no') {
+        quickAddBranch(node.id, 'No');
+      } else if (action === 'quick-next') {
+        quickAddBranch(node.id, '');
+      } else if (action === 'delete') {
         deleteSelected();
-      } else if (btn.classList.contains('btn-duplicate')) {
-        createNode(node.type, node.x + 30, node.y + 30, node.label);
-      } else if (btn.classList.contains('btn-change-type')) {
-        const types = Object.keys(NODE_TYPES);
-        const nextIdx = (types.indexOf(node.type) + 1) % types.length;
-        node.type = types[nextIdx];
-        render();
-        saveState();
       }
       return;
     }
 
-    // 3. Check if clicking on a node
+    // 3. Click on Node
     const nodeEl = e.target.closest('.canvas-node');
     if (nodeEl) {
       e.stopPropagation();
       const nodeId = nodeEl.dataset.id;
 
-      // Double click or click when already selected -> edit text
+      // Double click -> Inline edit
       if (state.selectedNodeId === nodeId && e.detail === 2) {
         state.editingNodeId = nodeId;
         render();
@@ -893,16 +877,21 @@
       return;
     }
 
-    // 4. Check if clicking on an edge or edge label
-    const edgePath = e.target.closest('.edge-path') || e.target.closest('.edge-label-group');
-    if (edgePath) {
+    // 4. Click on Edge or Edge Label
+    const edgeEl = e.target.closest('.edge-path') || e.target.closest('.edge-hit-area') || e.target.closest('.edge-label-group');
+    if (edgeEl) {
       e.stopPropagation();
-      const edgeId = edgePath.dataset.edgeId;
+      const edgeId = edgeEl.dataset.edgeId;
       selectEdge(edgeId, e.clientX, e.clientY);
       return;
     }
 
-    // 5. Clicking on canvas background -> Pan
+    // 5. Click on Edge Popover itself -> Do not deselect
+    if (e.target.closest('#edge-popover')) {
+      return;
+    }
+
+    // 6. Click on Canvas Background -> Pan
     state.selectedNodeId = null;
     state.selectedEdgeId = null;
     state.editingNodeId = null;
@@ -914,7 +903,6 @@
   }
 
   function handleMouseMove(e) {
-    // 1. Edge dragging preview
     if (state.connectingFrom) {
       const fromNode = state.nodes.find(n => n.id === state.connectingFrom.nodeId);
       if (fromNode) {
@@ -926,7 +914,6 @@
       return;
     }
 
-    // 2. Node dragging
     if (state.dragNodeId) {
       const dx = (e.clientX - state.dragStart.x) / state.zoom;
       const dy = (e.clientY - state.dragStart.y) / state.zoom;
@@ -939,7 +926,6 @@
       return;
     }
 
-    // 3. Canvas Panning
     if (state.isPanning) {
       state.pan.x = e.clientX - state.panStart.x;
       state.pan.y = e.clientY - state.panStart.y;
@@ -948,7 +934,6 @@
   }
 
   function handleMouseUp(e) {
-    // Finish edge connection
     if (state.connectingFrom) {
       dom.tempEdge.style.display = 'none';
       const targetPort = e.target.closest('.port');
@@ -966,13 +951,11 @@
       state.connectingFrom = null;
     }
 
-    // Finish node dragging
     if (state.dragNodeId) {
       state.dragNodeId = null;
       saveState();
     }
 
-    // Finish canvas panning
     if (state.isPanning) {
       state.isPanning = false;
     }
@@ -986,8 +969,6 @@
     const mouseY = e.clientY - rect.top;
 
     const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.3), 2.5);
-    
-    // Zoom centered at mouse position
     state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
     state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
     state.zoom = newZoom;
@@ -1024,17 +1005,42 @@
     render();
 
     const edge = state.edges.find(e => e.id === edgeId);
-    if (!edge || !dom.edgePopover) return;
+    if (edge) {
+      showEdgePopoverForEdge(edge, screenX, screenY);
+    }
+  }
+
+  function showEdgePopoverForEdge(edge, screenX, screenY) {
+    if (!dom.edgePopover) return;
 
     if (dom.edgeLabelInput) dom.edgeLabelInput.value = edge.label || '';
     if (dom.edgeStyleSelect) dom.edgeStyleSelect.value = edge.style || 'normal';
 
     const rect = dom.canvasWrapper.getBoundingClientRect();
-    let popX = screenX - rect.left + 15;
-    let popY = screenY - rect.top - 20;
+    let popX = 0;
+    let popY = 0;
 
-    if (popX + 240 > rect.width) popX = rect.width - 250;
-    if (popY + 160 > rect.height) popY = rect.height - 170;
+    if (screenX !== undefined && screenY !== undefined) {
+      popX = screenX - rect.left + 15;
+      popY = screenY - rect.top - 20;
+    } else {
+      // Calculate from node positions
+      const fromNode = state.nodes.find(n => n.id === edge.from);
+      const toNode = state.nodes.find(n => n.id === edge.to);
+      if (fromNode && toNode) {
+        const mid = getPathMidpoint(
+          getPortPosition(fromNode, edge.fromPort || 'bottom'),
+          getPortPosition(toNode, edge.toPort || 'top')
+        );
+        popX = mid.x * state.zoom + state.pan.x + 20;
+        popY = mid.y * state.zoom + state.pan.y - 40;
+      }
+    }
+
+    if (popX + 270 > rect.width) popX = rect.width - 280;
+    if (popY + 220 > rect.height) popY = rect.height - 230;
+    if (popX < 10) popX = 10;
+    if (popY < 10) popY = 10;
 
     dom.edgePopover.style.left = `${popX}px`;
     dom.edgePopover.style.top = `${popY}px`;
@@ -1049,7 +1055,6 @@
 
   // --- KEYBOARD SHORTCUTS ---
   function handleKeyboardShortcuts(e) {
-    // If typing in input or textarea, don't trigger canvas shortcuts
     if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1071,14 +1076,14 @@
   function copyMermaidCode() {
     const code = generateMermaidCode();
     navigator.clipboard.writeText(code).then(() => {
-      showToast('📋 ¡Código Mermaid copiado al portapapeles!');
+      showToast('📋 ¡Código Mermaid copiado!');
       if (dom.copyBtn) {
-        const originalText = dom.copyBtn.innerHTML;
+        const orig = dom.copyBtn.innerHTML;
         dom.copyBtn.innerHTML = '<span>✅ ¡Copiado!</span>';
-        setTimeout(() => dom.copyBtn.innerHTML = originalText, 1800);
+        setTimeout(() => dom.copyBtn.innerHTML = orig, 1800);
       }
     }).catch(err => {
-      showToast('Error al copiar. Selecciona el texto manualmente.');
+      showToast('Selecciona el código manualmente.');
     });
   }
 
@@ -1088,28 +1093,10 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `diagrama_flujo_${Date.now().toString(36)}.mmd`;
+    a.download = `diagrama_mermaid_${Date.now().toString(36)}.mmd`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('💾 Archivo .mmd descargado');
-  }
-
-  function exportSvg() {
-    // Find preview SVG or canvas SVG
-    const svgEl = dom.mermaidPreview.querySelector('svg');
-    if (svgEl) {
-      const svgData = new XMLSerializer().serializeToString(svgEl);
-      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `diagrama_${Date.now().toString(36)}.svg`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast('🖼️ SVG Vectorial descargado');
-    } else {
-      showToast('Copia el código Mermaid o abre la pestaña Vista Previa para SVG');
-    }
   }
 
   function showToast(msg) {
@@ -1122,7 +1109,7 @@
       toast.style.opacity = '0';
       toast.style.transition = 'opacity 0.3s';
       setTimeout(() => toast.remove(), 300);
-    }, 2400);
+    }, 2200);
   }
 
   function updateStats() {
@@ -1130,52 +1117,45 @@
     if (dom.edgeCount) dom.edgeCount.textContent = `${state.edges.length} conexiones`;
   }
 
-  // --- PRESET TEMPLATES ---
+  // --- TEMPLATES ---
   function loadTemplate(templateKey) {
     const templates = {
       auth: {
         direction: 'TD',
         nodes: [
           { id: 'Start', type: 'terminal', label: 'Inicio', x: 200, y: 50 },
-          { id: 'Input', type: 'io', label: 'Ingresar Usuario & Pass', x: 200, y: 150 },
+          { id: 'Input', type: 'io', label: 'Ingresar Credenciales', x: 200, y: 150 },
           { id: 'CheckAuth', type: 'decision', label: '¿Credenciales Válidas?', x: 200, y: 260 },
-          { id: 'QueryDB', type: 'database', label: 'Consultar Usuarios DB', x: 450, y: 260 },
-          { id: 'GenToken', type: 'process', label: 'Generar Token JWT', x: 200, y: 380 },
-          { id: 'ShowError', type: 'process', label: 'Mostrar Error 401', x: -50, y: 380 },
-          { id: 'End', type: 'terminal', label: 'Fin', x: 200, y: 490 }
+          { id: 'GenToken', type: 'process', label: 'Generar Token JWT', x: 80, y: 390 },
+          { id: 'ShowError', type: 'process', label: 'Mostrar Error 401', x: 330, y: 390 },
+          { id: 'End', type: 'terminal', label: 'Fin', x: 200, y: 510 }
         ],
         edges: [
           { id: 'e1', from: 'Start', to: 'Input', style: 'normal' },
           { id: 'e2', from: 'Input', to: 'CheckAuth', style: 'normal' },
-          { id: 'e3', from: 'CheckAuth', to: 'QueryDB', label: 'Verificar', style: 'dotted' },
-          { id: 'e4', from: 'CheckAuth', to: 'GenToken', label: 'Sí', style: 'thick' },
-          { id: 'e5', from: 'CheckAuth', to: 'ShowError', label: 'No', style: 'normal' },
-          { id: 'e6', from: 'GenToken', to: 'End', style: 'normal' },
-          { id: 'e7', from: 'ShowError', to: 'End', style: 'normal' }
+          { id: 'e3', from: 'CheckAuth', to: 'GenToken', label: 'Sí', style: 'thick' },
+          { id: 'e4', from: 'CheckAuth', to: 'ShowError', label: 'No', style: 'normal' },
+          { id: 'e5', from: 'GenToken', to: 'End', style: 'normal' },
+          { id: 'e6', from: 'ShowError', to: 'End', style: 'normal' }
         ]
       },
       payment: {
         direction: 'TD',
         nodes: [
-          { id: 'Init', type: 'terminal', label: 'Checkout Carrito', x: 200, y: 50 },
+          { id: 'Checkout', type: 'terminal', label: 'Inicio Compra', x: 200, y: 50 },
           { id: 'ValCard', type: 'decision', label: '¿Tarjeta Válida?', x: 200, y: 160 },
-          { id: 'Gateway', type: 'subroutine', label: 'Llamar Pasarela Stripe', x: 200, y: 280 },
-          { id: 'CheckFund', type: 'decision', label: '¿Fondos Aprobados?', x: 200, y: 400 },
-          { id: 'SaveOrder', type: 'database', label: 'Registrar Orden Pagada', x: 200, y: 520 },
-          { id: 'SendReceipt', type: 'process', label: 'Enviar Factura por Email', x: 200, y: 640 },
-          { id: 'FailMsg', type: 'process', label: 'Notificar Rechazo', x: 450, y: 400 },
-          { id: 'Done', type: 'terminal', label: 'Fin', x: 200, y: 760 }
+          { id: 'Stripe', type: 'subroutine', label: 'Procesar con Stripe', x: 80, y: 290 },
+          { id: 'FailMsg', type: 'process', label: 'Rechazar Transacción', x: 340, y: 290 },
+          { id: 'SaveDB', type: 'database', label: 'Registrar Orden Pagada', x: 80, y: 410 },
+          { id: 'Done', type: 'terminal', label: 'Fin', x: 200, y: 530 }
         ],
         edges: [
-          { id: 'ep1', from: 'Init', to: 'ValCard', style: 'normal' },
-          { id: 'ep2', from: 'ValCard', to: 'Gateway', label: 'Sí', style: 'normal' },
+          { id: 'ep1', from: 'Checkout', to: 'ValCard', style: 'normal' },
+          { id: 'ep2', from: 'ValCard', to: 'Stripe', label: 'Sí', style: 'thick' },
           { id: 'ep3', from: 'ValCard', to: 'FailMsg', label: 'No', style: 'normal' },
-          { id: 'ep4', from: 'Gateway', to: 'CheckFund', style: 'normal' },
-          { id: 'ep5', from: 'CheckFund', to: 'SaveOrder', label: 'Aprobado', style: 'thick' },
-          { id: 'ep6', from: 'CheckFund', to: 'FailMsg', label: 'Rechazado', style: 'normal' },
-          { id: 'ep7', from: 'SaveOrder', to: 'SendReceipt', style: 'normal' },
-          { id: 'ep8', from: 'SendReceipt', to: 'Done', style: 'normal' },
-          { id: 'ep9', from: 'FailMsg', to: 'Done', style: 'normal' }
+          { id: 'ep4', from: 'Stripe', to: 'SaveDB', label: 'Aprobado', style: 'normal' },
+          { id: 'ep5', from: 'SaveDB', to: 'Done', style: 'normal' },
+          { id: 'ep6', from: 'FailMsg', to: 'Done', style: 'normal' }
         ]
       },
       etl: {
@@ -1184,15 +1164,15 @@
           { id: 'Src', type: 'database', label: 'Fuente CSV / API', x: 50, y: 150 },
           { id: 'Extract', type: 'process', label: 'Extracción de Datos', x: 250, y: 150 },
           { id: 'Validate', type: 'decision', label: '¿Schema Válido?', x: 450, y: 150 },
-          { id: 'Transform', type: 'process', label: 'Transformar & Normalizar', x: 680, y: 150 },
-          { id: 'Load', type: 'database', label: 'Data Warehouse (SQL)', x: 920, y: 150 },
-          { id: 'DLQ', type: 'database', label: 'Dead Letter Queue', x: 680, y: 300 }
+          { id: 'Transform', type: 'process', label: 'Transformar & Normalizar', x: 680, y: 100 },
+          { id: 'DLQ', type: 'database', label: 'Dead Letter Queue', x: 680, y: 230 },
+          { id: 'Load', type: 'database', label: 'Data Warehouse (SQL)', x: 920, y: 100 }
         ],
         edges: [
           { id: 'ee1', from: 'Src', to: 'Extract', style: 'normal' },
           { id: 'ee2', from: 'Extract', to: 'Validate', style: 'normal' },
-          { id: 'ee3', from: 'Validate', to: 'Transform', label: 'Válido', style: 'thick' },
-          { id: 'ee4', from: 'Validate', to: 'DLQ', label: 'Inválido', style: 'dotted' },
+          { id: 'ee3', from: 'Validate', to: 'Transform', label: 'Sí', style: 'thick' },
+          { id: 'ee4', from: 'Validate', to: 'DLQ', label: 'No', style: 'dotted' },
           { id: 'ee5', from: 'Transform', to: 'Load', style: 'normal' }
         ]
       }
@@ -1214,7 +1194,6 @@
     }
   }
 
-  // Initialize once DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
