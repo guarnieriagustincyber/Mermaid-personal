@@ -3,158 +3,249 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MermaidFlow Studio</title>
+  <title>MermaidFlow Studio - Editor Visual y Código Bidireccional</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 </head>
 <body>
 
+  <!-- Minimal Top Header -->
   <header>
-    <div class="brand">
-      <div class="brand-icon">⚡</div>
-      <h1>MermaidFlow Studio</h1>
-      <span class="badge">Visual Editor</span>
+    <div class="header-left">
+      <div class="brand-logo">⚡</div>
+      <span class="brand-title">MermaidFlow</span>
+      <span class="brand-badge">Bidireccional</span>
     </div>
 
     <div class="header-center">
-      <select id="select-direction" title="Orientación del diagrama">
-        <option value="TD">↓ Arriba → Abajo (TD)</option>
-        <option value="LR">→ Izquierda → Derecha (LR)</option>
-        <option value="BT">↑ Abajo → Arriba (BT)</option>
-        <option value="RL">← Derecha → Izquierda (RL)</option>
-      </select>
+      <div class="header-group">
+        <button id="btn-undo" class="hdr-btn" title="Deshacer (Ctrl+Z)">↩</button>
+        <button id="btn-redo" class="hdr-btn" title="Rehacer (Ctrl+Y)">↪</button>
+      </div>
 
-      <select id="select-template" title="Cargar plantilla de ejemplo">
+      <div class="divider-v"></div>
+
+      <select id="select-template" class="hdr-select" title="Cargar Plantilla">
         <option value="">📂 Plantillas...</option>
         <option value="auth">🔐 Autenticación JWT</option>
         <option value="payment">💳 Pasarela de Pago</option>
         <option value="etl">📊 Pipeline ETL</option>
-        <option value="empty">⬜ Lienzo Vacío</option>
+        <option value="blank">⬜ Lienzo Limpio</option>
       </select>
+
+      <button id="btn-clear" class="hdr-btn text-danger" title="Limpiar todo el lienzo">🗑️ Limpiar</button>
     </div>
 
     <div class="header-right">
-      <button id="btn-clear" class="btn-ghost" title="Limpiar todo">🗑️ Limpiar</button>
-      <button id="btn-theme" class="btn-ghost" title="Cambiar Tema">🌓</button>
-      <button id="btn-copy" class="btn-success" title="Copiar código Mermaid">
-        📋 Copiar Código
+      <button id="btn-theme-toggle" class="hdr-btn" title="Cambiar Tema Oscuro/Claro">🌓</button>
+      <button id="btn-toggle-code" class="hdr-btn active" title="Mostrar/Ocultar Panel de Código">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+        <span>Código (Editable)</span>
+      </button>
+      <button id="btn-copy-mermaid" class="btn-copy-main" title="Copiar código Mermaid al portapapeles">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        <span>Copiar Mermaid</span>
       </button>
     </div>
   </header>
 
-  <div class="app-container">
+  <!-- Main Canvas Workspace -->
+  <div class="workspace-wrapper">
 
-    <!-- Left: Node Palette -->
-    <aside class="sidebar-palette">
-      <div class="sidebar-title">Agregar Nodo</div>
-      <div class="palette-items">
-        <button class="palette-card" data-type="terminal">
-          <div class="shape-icon"><div class="sp sp-terminal"></div></div>
-          <div class="palette-info"><span class="pname">Inicio / Fin</span><span class="psyntax">([...])</span></div>
-        </button>
-        <button class="palette-card" data-type="process">
-          <div class="shape-icon"><div class="sp sp-process"></div></div>
-          <div class="palette-info"><span class="pname">Proceso</span><span class="psyntax">[...]</span></div>
-        </button>
-        <button class="palette-card" data-type="decision">
-          <div class="shape-icon"><div class="sp sp-decision"></div></div>
-          <div class="palette-info"><span class="pname">Decisión</span><span class="psyntax">{...}</span></div>
-        </button>
-        <button class="palette-card" data-type="database">
-          <div class="shape-icon"><div class="sp sp-database"></div></div>
-          <div class="palette-info"><span class="pname">Base de Datos</span><span class="psyntax">[(...)]</span></div>
-        </button>
-        <button class="palette-card" data-type="io">
-          <div class="shape-icon"><div class="sp sp-io"></div></div>
-          <div class="palette-info"><span class="pname">Entrada / Salida</span><span class="psyntax">[/.../]</span></div>
-        </button>
-        <button class="palette-card" data-type="subroutine">
-          <div class="shape-icon"><div class="sp sp-sub"></div></div>
-          <div class="palette-info"><span class="pname">Subproceso</span><span class="psyntax">[[...]]</span></div>
-        </button>
-      </div>
+    <!-- FLOATING ISLAND TOOLBAR (Top Center Dock with rounded corners) -->
+    <div class="floating-dock" id="floating-dock">
+      
+      <!-- Shape buttons with inline SVG icons -->
+      <div class="dock-section">
+        <span class="dock-label">Formas:</span>
+        <div class="dock-buttons">
+          <button class="dock-btn" data-shape="terminal" title="Inicio / Fin ([Texto])">
+            <svg width="22" height="14" viewBox="0 0 24 14"><rect x="1" y="1" width="22" height="12" rx="6" fill="rgba(16,185,129,0.25)" stroke="#10b981" stroke-width="1.8"/></svg>
+            <span>Inicio/Fin</span>
+          </button>
+          
+          <button class="dock-btn" data-shape="process" title="Proceso [Texto]">
+            <svg width="20" height="14" viewBox="0 0 24 14"><rect x="1" y="1" width="22" height="12" rx="2" fill="rgba(56,189,248,0.25)" stroke="#38bdf8" stroke-width="1.8"/></svg>
+            <span>Proceso</span>
+          </button>
+          
+          <button class="dock-btn" data-shape="decision" title="Decisión / Condición {¿Texto?}">
+            <svg width="18" height="18" viewBox="0 0 24 24"><polygon points="12 2, 22 12, 12 22, 2 12" fill="rgba(245,158,11,0.25)" stroke="#f59e0b" stroke-width="1.8"/></svg>
+            <span>Decisión</span>
+          </button>
+          
+          <button class="dock-btn" data-shape="database" title="Base de Datos [(Texto)]">
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <path d="M4 6 C4 3 20 3 20 6 L20 18 C20 21 4 21 4 18 Z" fill="rgba(168,85,247,0.25)" stroke="#a855f7" stroke-width="1.6"/>
+              <ellipse cx="12" cy="6" rx="8" ry="3" fill="none" stroke="#a855f7" stroke-width="1.6"/>
+            </svg>
+            <span>DB</span>
+          </button>
+          
+          <button class="dock-btn" data-shape="io" title="Entrada / Salida [/Texto/]">
+            <svg width="20" height="14" viewBox="0 0 24 14"><polygon points="5 1, 23 1, 19 13, 1 13" fill="rgba(6,182,212,0.25)" stroke="#06b6d4" stroke-width="1.8"/></svg>
+            <span>E / S</span>
+          </button>
 
-      <div class="sidebar-help">
-        <b>Cómo usar:</b>
-        <ul>
-          <li>Clic en una forma → se agrega al diagrama.</li>
-          <li>Clic en un nodo del diagrama → editar, conectar o borrar.</li>
-          <li>Clic en una flecha → poner condición (Sí / No).</li>
-          <li><b>Decisión:</b> usa <b>+ Sí</b> / <b>+ No</b> para ramificar.</li>
-        </ul>
-      </div>
-    </aside>
-
-    <!-- Center: Mermaid Rendered Diagram (THE WORKSPACE) -->
-    <main class="diagram-workspace" id="diagram-workspace">
-      <div class="diagram-scroll" id="diagram-scroll">
-        <div class="diagram-container" id="diagram-container">
-          <!-- Mermaid SVG is rendered here -->
+          <button class="dock-btn" data-shape="subroutine" title="Subproceso [[Texto]]">
+            <svg width="20" height="14" viewBox="0 0 24 14">
+              <rect x="1" y="1" width="22" height="12" rx="2" fill="rgba(99,102,241,0.25)" stroke="#6366f1" stroke-width="1.8"/>
+              <line x1="5" y1="1" x2="5" y2="13" stroke="#6366f1" stroke-width="1.5"/>
+              <line x1="19" y1="1" x2="19" y2="13" stroke="#6366f1" stroke-width="1.5"/>
+            </svg>
+            <span>Subrutina</span>
+          </button>
         </div>
       </div>
 
-      <!-- Floating Node Action Bar -->
-      <div class="node-action-bar" id="node-action-bar"></div>
+      <div class="dock-divider"></div>
 
-      <!-- Floating Edge Popover -->
-      <div class="edge-popover" id="edge-popover">
-        <div class="pop-title">Condición de la Flecha</div>
-        <div class="condition-pills">
-          <button class="cpill cpill-yes" data-val="Sí">✔ Sí</button>
-          <button class="cpill cpill-no" data-val="No">✖ No</button>
-          <button class="cpill cpill-ok" data-val="OK">● OK</button>
-          <button class="cpill cpill-err" data-val="Error">⚠ Error</button>
-          <button class="cpill cpill-clear" data-val="">∅ Ninguna</button>
+      <!-- Colors palette -->
+      <div class="dock-section">
+        <span class="dock-label">Color:</span>
+        <div class="color-palette">
+          <button class="color-swatch active" data-color="emerald" style="--c:#10b981;" title="Esmeralda"></button>
+          <button class="color-swatch" data-color="sky" style="--c:#0284c7;" title="Azul"></button>
+          <button class="color-swatch" data-color="amber" style="--c:#f59e0b;" title="Ámbar"></button>
+          <button class="color-swatch" data-color="purple" style="--c:#a855f7;" title="Púrpura"></button>
+          <button class="color-swatch" data-color="rose" style="--c:#ef4444;" title="Rojo"></button>
+          <button class="color-swatch" data-color="cyan" style="--c:#06b6d4;" title="Cian"></button>
+          <button class="color-swatch" data-color="slate" style="--c:#64748b;" title="Gris"></button>
         </div>
-        <input type="text" id="edge-label-input" placeholder="Texto libre..." />
-        <select id="edge-style-select">
-          <option value="normal">→ Flecha Normal</option>
-          <option value="thick">⇒ Flecha Gruesa</option>
-          <option value="dotted">⇢ Punteada</option>
+      </div>
+
+      <div class="dock-divider"></div>
+
+      <!-- Direction & Auto-Layout -->
+      <div class="dock-section">
+        <select id="select-direction" class="dock-select" title="Dirección del diagrama">
+          <option value="TD">↓ Arriba-Abajo (TD)</option>
+          <option value="LR">→ Izq-Der (LR)</option>
+          <option value="BT">↑ Abajo-Arriba (BT)</option>
+          <option value="RL">← Der-Izq (RL)</option>
         </select>
-        <button class="pop-delete" id="btn-delete-edge">🗑️ Borrar Flecha</button>
+
+        <button id="btn-auto-layout" class="btn-dock-action" title="Auto-Organizar nodos jerárquicamente">
+          <span>⚡ Auto-Organizar</span>
+        </button>
       </div>
 
-      <!-- Inline Text Editor Overlay -->
-      <input type="text" class="inline-editor" id="inline-editor" />
+    </div>
 
-      <!-- Connect Mode Banner -->
-      <div class="connect-banner" id="connect-banner">
-        🔗 Modo Conectar: haz clic en el nodo destino &nbsp;
-        <button id="btn-cancel-connect" class="btn-ghost" style="font-size:12px;padding:3px 8px;">✕ Cancelar</button>
+    <!-- CANVAS INTERACTIVO -->
+    <main class="canvas-viewport" id="canvas-viewport">
+      <div class="canvas-world" id="canvas-world">
+        <!-- SVG Connections Layer -->
+        <svg id="svg-canvas" class="svg-canvas">
+          <defs>
+            <marker id="arrow-default" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+            </marker>
+            <marker id="arrow-selected" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+            </marker>
+          </defs>
+          <g id="edges-layer"></g>
+          <path id="temp-connecting-line" class="temp-connecting-line" style="display: none;"></path>
+        </svg>
+
+        <!-- HTML Nodes Layer -->
+        <div id="nodes-layer" class="nodes-layer"></div>
       </div>
 
-      <!-- Zoom Controls -->
-      <div class="zoom-controls">
-        <button id="btn-zoom-out" class="btn-ghost">−</button>
-        <span id="zoom-level" class="zoom-label">100%</span>
-        <button id="btn-zoom-in" class="btn-ghost">+</button>
-        <button id="btn-zoom-fit" class="btn-ghost" title="Ajustar">⊞</button>
+      <!-- Floating Node Inspector / Actions Bar (Appears on Selected Node) -->
+      <div class="node-floating-toolbar" id="node-floating-toolbar">
+        <div id="node-branch-actions" class="toolbar-group"></div>
+        <div class="toolbar-divider"></div>
+        <button id="btn-node-edit" class="tool-btn" title="Editar texto (Doble clic)">✏️</button>
+        <button id="btn-node-connect" class="tool-btn" title="Conectar con otro nodo">🔗</button>
+        <button id="btn-node-delete" class="tool-btn text-danger" title="Eliminar nodo (Supr)">🗑️</button>
+      </div>
+
+      <!-- Floating Edge / Condition Popover -->
+      <div class="edge-floating-popover" id="edge-floating-popover">
+        <div class="popover-header">
+          <span>Condición de la Flecha</span>
+          <button id="btn-delete-edge-popover" class="btn-pop-del" title="Eliminar flecha">🗑️</button>
+        </div>
+
+        <div class="condition-chips">
+          <button class="chip-btn chip-yes" data-val="Sí">🟢 Sí</button>
+          <button class="chip-btn chip-no" data-val="No">🔴 No</button>
+          <button class="chip-btn chip-ok" data-val="OK">🔵 OK</button>
+          <button class="chip-btn chip-err" data-val="Error">🟠 Error</button>
+          <button class="chip-btn chip-none" data-val="">⚪ Sin texto</button>
+        </div>
+
+        <div class="popover-row">
+          <input type="text" id="edge-text-input" placeholder="O escribe texto libre..." spellcheck="false" />
+        </div>
+
+        <div class="popover-row">
+          <select id="edge-style-picker">
+            <option value="normal">Flecha Normal (-->)</option>
+            <option value="thick">Flecha Gruesa (==>)</option>
+            <option value="dotted">Línea Punteada (-.->)</option>
+            <option value="open">Línea Simple (---)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Connect Mode Indicator Banner -->
+      <div class="connect-guide-banner" id="connect-guide-banner">
+        <span>🔗 Haz clic en el nodo de destino para crear la conexión</span>
+        <button id="btn-cancel-connection" class="btn-cancel-link">✕ Cancelar</button>
+      </div>
+
+      <!-- Bottom Canvas Zoom Controls -->
+      <div class="floating-zoom-controls">
+        <button id="btn-zoom-out" class="zoom-btn" title="Alejar (−)">−</button>
+        <span id="zoom-value" class="zoom-text">100%</span>
+        <button id="btn-zoom-in" class="zoom-btn" title="Acercar (+)">+</button>
+        <button id="btn-zoom-reset" class="zoom-btn" title="Restablecer">⟲</button>
       </div>
     </main>
 
-    <!-- Right: Live Mermaid Code -->
-    <aside class="sidebar-code">
-      <div class="code-header">
-        <span class="code-title">Código Mermaid</span>
+    <!-- COLLAPSIBLE RIGHT SIDEBAR: BIDIRECTIONAL EDITABLE MERMAID CODE -->
+    <aside class="sidebar-code" id="sidebar-code">
+      <div class="code-panel-header">
+        <div class="code-panel-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          <span>Editor de Código Mermaid</span>
+        </div>
+        <button id="btn-close-code-panel" class="btn-icon-close" title="Ocultar panel">✕</button>
       </div>
-      <div class="code-body">
-        <textarea id="mermaid-code" readonly spellcheck="false"></textarea>
+
+      <div class="code-panel-info-bar">
+        <span>✍️ Puedes editar o pegar código aquí (se auto-organiza en el lienzo)</span>
       </div>
-      <div class="code-footer">
-        <div class="stats">
+
+      <div class="code-panel-body">
+        <textarea id="mermaid-code-output" placeholder="Pega o escribe tu código Mermaid aquí (ej: flowchart TD...)" spellcheck="false"></textarea>
+      </div>
+
+      <div class="code-panel-footer">
+        <div class="code-stats">
           <span id="stat-nodes">0 nodos</span>
           <span id="stat-edges">0 conexiones</span>
+          <span id="sync-status" class="sync-status">⚡ Sincronizado</span>
         </div>
-        <button id="btn-download" class="btn-ghost" style="width:100%;justify-content:center;">
-          💾 Descargar .mmd
-        </button>
+        <div class="code-footer-actions">
+          <button id="btn-apply-code" class="btn-apply-code" title="Parsear y auto-organizar en el lienzo">
+            ⚡ Aplicar Código al Lienzo
+          </button>
+          <button id="btn-download-mmd" class="btn-download-file" title="Descargar archivo .mmd">
+            💾 Guardar .mmd
+          </button>
+        </div>
       </div>
     </aside>
+
   </div>
 
+  <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
+  <!-- Main JavaScript App with Bidirectional Parser -->
   <script src="app.js"></script>
 </body>
 </html>

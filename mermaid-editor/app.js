@@ -1,144 +1,178 @@
 /**
- * MermaidFlow Studio v2 — Mermaid-Native Interactive Editor
- * Work directly on the rendered Mermaid diagram.
+ * MermaidFlow Studio - Complete Interactive Visual Flowchart & Bidirectional Mermaid Parser
+ * High-Performance Vanilla JS + SVG Architecture
  */
+
 (function () {
   'use strict';
 
-  // ── Shape Config ──
+  // --- NODE SHAPE DEFINITIONS ---
   const SHAPES = {
-    terminal:   { prefix: '([', suffix: '])', text: 'Inicio' },
-    process:    { prefix: '[',  suffix: ']',  text: 'Proceso' },
-    decision:   { prefix: '{',  suffix: '}',  text: '¿Condición?' },
-    database:   { prefix: '[(', suffix: ')]', text: 'Base de Datos' },
-    io:         { prefix: '[/', suffix: '/]', text: 'Leer Datos' },
-    subroutine: { prefix: '[[', suffix: ']]', text: 'Subproceso()' }
+    terminal:   { name: 'Inicio / Fin', prefix: '([', suffix: '])', className: 'shape-terminal', defaultText: 'Inicio' },
+    process:    { name: 'Proceso', prefix: '[', suffix: ']', className: 'shape-process', defaultText: 'Proceso' },
+    decision:   { name: 'Decisión', prefix: '{', suffix: '}', className: 'shape-decision', defaultText: '¿Es válido?' },
+    database:   { name: 'Base de Datos', prefix: '[(', suffix: ')]', className: 'shape-database', defaultText: 'Base de Datos' },
+    io:         { name: 'Entrada / Salida', prefix: '[/', suffix: '/]', className: 'shape-io', defaultText: 'Leer Datos' },
+    subroutine: { name: 'Subproceso', prefix: '[[', suffix: ']]', className: 'shape-subroutine', defaultText: 'Subproceso()' }
   };
 
-  // ── State ──
+  // --- STATE ---
   const state = {
-    nodes: [],      // { id, type, label }
-    edges: [],      // { from, to, label, style }
-    direction: 'TD',
+    nodes: [],
+    edges: [],
     selectedNodeId: null,
-    selectedEdgeIdx: null,
-    connectFromId: null,
+    selectedEdgeId: null,
+    editingNodeId: null,
+    activeColor: 'emerald',
+    direction: 'TD',
+    pan: { x: 120, y: 100 },
     zoom: 1,
-    theme: 'dark',
+    isPanning: false,
+    panStart: { x: 0, y: 0 },
+    dragNodeId: null,
+    dragStart: { x: 0, y: 0 },
+    nodeStartPos: { x: 0, y: 0 },
+    connectingFrom: null,
+    connectModeFromId: null,
     history: [],
-    historyIdx: -1
+    historyIdx: -1,
+    theme: 'dark',
+    codePanelOpen: true,
+    isTypingCode: false
   };
 
-  // ── DOM Cache ──
+  // --- DOM REFERENCES ---
   const $ = id => document.getElementById(id);
   const dom = {
-    workspace:    $('diagram-workspace'),
-    scroll:       $('diagram-scroll'),
-    container:    $('diagram-container'),
-    actionBar:    $('node-action-bar'),
-    edgePopover:  $('edge-popover'),
-    edgeLabelIn:  $('edge-label-input'),
-    edgeStyleSel: $('edge-style-select'),
-    btnDelEdge:   $('btn-delete-edge'),
-    inlineEditor: $('inline-editor'),
-    connectBanner:$('connect-banner'),
-    cancelConnect:$('btn-cancel-connect'),
-    codeArea:     $('mermaid-code'),
-    btnCopy:      $('btn-copy'),
-    btnClear:     $('btn-clear'),
-    btnTheme:     $('btn-theme'),
-    btnDownload:  $('btn-download'),
-    dirSelect:    $('select-direction'),
-    tplSelect:    $('select-template'),
-    zoomIn:       $('btn-zoom-in'),
-    zoomOut:      $('btn-zoom-out'),
-    zoomFit:      $('btn-zoom-fit'),
-    zoomLabel:    $('zoom-level'),
-    statNodes:    $('stat-nodes'),
-    statEdges:    $('stat-edges'),
-    toasts:       $('toast-container')
+    viewport: $('canvas-viewport'),
+    world: $('canvas-world'),
+    svgCanvas: $('svg-canvas'),
+    edgesLayer: $('edges-layer'),
+    tempLine: $('temp-connecting-line'),
+    nodesLayer: $('nodes-layer'),
+    nodeToolbar: $('node-floating-toolbar'),
+    nodeBranchActions: $('node-branch-actions'),
+    btnNodeEdit: $('btn-node-edit'),
+    btnNodeConnect: $('btn-node-connect'),
+    btnNodeDelete: $('btn-node-delete'),
+    edgePopover: $('edge-floating-popover'),
+    edgeTextInput: $('edge-text-input'),
+    edgeStylePicker: $('edge-style-picker'),
+    btnDeleteEdge: $('btn-delete-edge-popover'),
+    connectBanner: $('connect-guide-banner'),
+    btnCancelConnect: $('btn-cancel-connection'),
+    mermaidCode: $('mermaid-code-output'),
+    sidebarCode: $('sidebar-code'),
+    btnToggleCode: $('btn-toggle-code'),
+    btnCloseCode: $('btn-close-code-panel'),
+    btnApplyCode: $('btn-apply-code'),
+    btnCopy: $('btn-copy-mermaid'),
+    btnUndo: $('btn-undo'),
+    btnRedo: $('btn-redo'),
+    btnClear: $('btn-clear'),
+    btnTheme: $('btn-theme-toggle'),
+    btnDownloadMmd: $('btn-download-mmd'),
+    selectTemplate: $('select-template'),
+    selectDirection: $('select-direction'),
+    btnAutoLayout: $('btn-auto-layout'),
+    zoomIn: $('btn-zoom-in'),
+    zoomOut: $('btn-zoom-out'),
+    zoomReset: $('btn-zoom-reset'),
+    zoomValue: $('zoom-value'),
+    statNodes: $('stat-nodes'),
+    statEdges: $('stat-edges'),
+    syncStatus: $('sync-status'),
+    toastContainer: $('toast-container')
   };
 
-  let renderCounter = 0;
+  let codeDebounceTimer = null;
 
-  // ── Init ──
+  // --- INITIALIZATION ---
   function init() {
     loadTheme();
-    initMermaid();
-    wireEvents();
+    setupEventListeners();
+    setupDockButtons();
 
-    if (!loadFromStorage()) loadTemplate('auth');
-    else renderDiagram();
-  }
-
-  function initMermaid() {
-    if (typeof mermaid === 'undefined') {
-      dom.container.innerHTML = '<div class="empty-state"><h2>Cargando Mermaid.js...</h2><p>Asegúrate de tener conexión a internet.</p></div>';
-      return;
+    if (!loadFromStorage()) {
+      loadTemplate('auth');
     }
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: state.theme === 'dark' ? 'dark' : 'default',
-      securityLevel: 'loose',
-      flowchart: { curve: 'basis', htmlLabels: true, useMaxWidth: false }
+
+    updateWorldTransform();
+    render();
+    saveState();
+
+    setTimeout(() => autoLayout(false), 80);
+  }
+
+  // --- STATE PERSISTENCE & HISTORY ---
+  function saveState(updateTextarea = true) {
+    const snapshot = JSON.stringify({
+      nodes: state.nodes,
+      edges: state.edges,
+      direction: state.direction
     });
-  }
 
-  // ── Persistence ──
-  function snapshot() {
-    return JSON.stringify({ nodes: state.nodes, edges: state.edges, direction: state.direction });
-  }
-
-  function pushHistory() {
-    const snap = snapshot();
     if (state.historyIdx < state.history.length - 1) {
       state.history = state.history.slice(0, state.historyIdx + 1);
     }
-    state.history.push(snap);
+    state.history.push(snapshot);
     state.historyIdx++;
-    try { localStorage.setItem('mermaidflow_v2', snap); } catch (e) {}
-    updateCode();
+
+    try {
+      localStorage.setItem('mermaidflow_v3', snapshot);
+    } catch (e) {}
+
+    if (updateTextarea && !state.isTypingCode) {
+      updateMermaidCode();
+    }
     updateStats();
   }
 
   function undo() {
     if (state.historyIdx > 0) {
       state.historyIdx--;
-      restore(state.history[state.historyIdx]);
-      toast('↩ Deshacer');
+      restoreSnapshot(state.history[state.historyIdx]);
+      showToast('↩️ Deshacer');
     }
   }
 
   function redo() {
     if (state.historyIdx < state.history.length - 1) {
       state.historyIdx++;
-      restore(state.history[state.historyIdx]);
-      toast('↪ Rehacer');
+      restoreSnapshot(state.history[state.historyIdx]);
+      showToast('↪️ Rehacer');
     }
   }
 
-  function restore(snap) {
+  function restoreSnapshot(jsonStr) {
     try {
-      const d = JSON.parse(snap);
-      state.nodes = d.nodes || [];
-      state.edges = d.edges || [];
-      state.direction = d.direction || 'TD';
-      dom.dirSelect.value = state.direction;
-      deselect();
-      renderDiagram();
-    } catch (e) { console.error(e); }
+      const data = JSON.parse(jsonStr);
+      state.nodes = data.nodes || [];
+      state.edges = data.edges || [];
+      state.direction = data.direction || 'TD';
+      if (dom.selectDirection) dom.selectDirection.value = state.direction;
+      state.selectedNodeId = null;
+      state.selectedEdgeId = null;
+      hideNodeToolbar();
+      hideEdgePopover();
+      render();
+      updateMermaidCode();
+      updateStats();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   function loadFromStorage() {
     try {
-      const s = localStorage.getItem('mermaidflow_v2');
-      if (s) {
-        const d = JSON.parse(s);
-        if (d.nodes && d.nodes.length > 0) {
-          state.nodes = d.nodes;
-          state.edges = d.edges || [];
-          state.direction = d.direction || 'TD';
-          dom.dirSelect.value = state.direction;
+      const saved = localStorage.getItem('mermaidflow_v3');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.nodes && data.nodes.length > 0) {
+          state.nodes = data.nodes;
+          state.edges = data.edges || [];
+          state.direction = data.direction || 'TD';
+          if (dom.selectDirection) dom.selectDirection.value = state.direction;
           return true;
         }
       }
@@ -146,7 +180,7 @@
     return false;
   }
 
-  // ── Theme ──
+  // --- THEME ---
   function loadTheme() {
     state.theme = localStorage.getItem('mermaidflow_theme') || 'dark';
     document.documentElement.setAttribute('data-theme', state.theme);
@@ -156,129 +190,509 @@
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', state.theme);
     localStorage.setItem('mermaidflow_theme', state.theme);
-    initMermaid();
-    renderDiagram();
-    toast(state.theme === 'dark' ? '🌙 Modo Oscuro' : '☀️ Modo Claro');
+    showToast(state.theme === 'dark' ? '🌙 Modo Oscuro' : '☀️ Modo Claro');
   }
 
-  // ── ID Generator ──
-  function nextId() {
-    const used = new Set(state.nodes.map(n => n.id));
-    for (let i = 0; i < 702; i++) {
-      let id;
-      if (i < 26) id = String.fromCharCode(65 + i);
-      else id = String.fromCharCode(65 + Math.floor((i - 26) / 26)) + String.fromCharCode(65 + (i - 26) % 26);
-      if (!used.has(id)) return id;
+  // --- ID GENERATOR ---
+  function getNextNodeId() {
+    const existing = new Set(state.nodes.map(n => n.id));
+    for (let i = 0; i < 26; i++) {
+      const letter = String.fromCharCode(65 + i);
+      if (!existing.has(letter)) return letter;
     }
-    return 'N' + Date.now().toString(36).slice(-4);
+    for (let i = 0; i < 26; i++) {
+      for (let j = 0; j < 26; j++) {
+        const pair = String.fromCharCode(65 + i) + String.fromCharCode(65 + j);
+        if (!existing.has(pair)) return pair;
+      }
+    }
+    return `N${state.nodes.length + 1}`;
   }
 
-  // ── Data Operations ──
-  function addNode(type, label) {
-    const shape = SHAPES[type] || SHAPES.process;
-    const node = { id: nextId(), type, label: label || shape.text };
+  // --- NODE & EDGE OPERATIONS ---
+  function createNode(shape, x, y, label = null, color = null) {
+    const shapeDef = SHAPES[shape] || SHAPES.process;
+    const nodeColor = color || (shape === 'terminal' ? 'emerald' : (shape === 'decision' ? 'amber' : (shape === 'database' ? 'purple' : state.activeColor)));
+
+    const node = {
+      id: getNextNodeId(),
+      shape: shape,
+      color: nodeColor,
+      label: label || shapeDef.defaultText,
+      x: Math.round(x),
+      y: Math.round(y),
+      width: shape === 'decision' ? 150 : 140,
+      height: shape === 'decision' ? 60 : 52
+    };
+
     state.nodes.push(node);
-    deselect();
-    pushHistory();
-    renderDiagram().then(() => {
-      selectNode(node.id);
-    });
+    state.selectedNodeId = node.id;
+    state.selectedEdgeId = null;
+    hideEdgePopover();
+
+    render();
+    saveState();
+    positionNodeToolbar(node);
     return node;
   }
 
-  function addEdge(from, to, label, style) {
-    if (from === to) return null;
-    if (state.edges.some(e => e.from === from && e.to === to)) return null;
-    const edge = { from, to, label: label || '', style: style || 'normal' };
+  function createEdge(fromId, toId, fromPort = 'bottom', toPort = 'top', label = '', style = 'normal') {
+    if (fromId === toId) return null;
+    const exists = state.edges.some(e => e.from === fromId && e.to === toId);
+    if (exists) return null;
+
+    const edge = {
+      id: `edge_${fromId}_${toId}_${Date.now().toString(36)}`,
+      from: fromId,
+      to: toId,
+      fromPort: fromPort,
+      toPort: toPort,
+      label: label || '',
+      style: style || 'normal'
+    };
+
     state.edges.push(edge);
-    pushHistory();
-    renderDiagram();
+    state.selectedEdgeId = edge.id;
+    state.selectedNodeId = null;
+    hideNodeToolbar();
+
+    render();
+    saveState();
+
+    const fromNode = state.nodes.find(n => n.id === fromId);
+    if (fromNode && fromNode.shape === 'decision' && !label) {
+      setTimeout(() => showEdgePopoverForEdge(edge), 40);
+    }
+
     return edge;
   }
 
-  function deleteNode(id) {
-    state.nodes = state.nodes.filter(n => n.id !== id);
-    state.edges = state.edges.filter(e => e.from !== id && e.to !== id);
-    deselect();
-    pushHistory();
-    renderDiagram();
+  function quickAddBranch(fromNodeId, conditionLabel = '') {
+    const fromNode = state.nodes.find(n => n.id === fromNodeId);
+    if (!fromNode) return;
+
+    const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
+    let newX = fromNode.x;
+    let newY = fromNode.y;
+
+    if (conditionLabel === 'Sí') {
+      newX = isHorizontal ? fromNode.x + 220 : fromNode.x - 110;
+      newY = isHorizontal ? fromNode.y - 70 : fromNode.y + 130;
+    } else if (conditionLabel === 'No') {
+      newX = isHorizontal ? fromNode.x + 220 : fromNode.x + 110;
+      newY = isHorizontal ? fromNode.y + 70 : fromNode.y + 130;
+    } else {
+      newX = isHorizontal ? fromNode.x + 220 : fromNode.x;
+      newY = isHorizontal ? fromNode.y : fromNode.y + 130;
+    }
+
+    const nextText = conditionLabel === 'Sí' ? 'Acción Sí' : (conditionLabel === 'No' ? 'Acción No' : 'Siguiente Paso');
+    const newNode = createNode('process', newX, newY, nextText, fromNode.color);
+    createEdge(fromNode.id, newNode.id, 'bottom', 'top', conditionLabel, 'normal');
+
+    autoLayout(true);
   }
 
-  function deleteEdge(idx) {
-    if (idx >= 0 && idx < state.edges.length) {
-      state.edges.splice(idx, 1);
-      deselect();
-      pushHistory();
-      renderDiagram();
+  function deleteSelected() {
+    let modified = false;
+    if (state.selectedNodeId) {
+      const id = state.selectedNodeId;
+      state.nodes = state.nodes.filter(n => n.id !== id);
+      state.edges = state.edges.filter(e => e.from !== id && e.to !== id);
+      state.selectedNodeId = null;
+      hideNodeToolbar();
+      modified = true;
+    } else if (state.selectedEdgeId) {
+      const id = state.selectedEdgeId;
+      state.edges = state.edges.filter(e => e.id !== id);
+      state.selectedEdgeId = null;
+      hideEdgePopover();
+      modified = true;
+    }
+
+    if (modified) {
+      render();
+      saveState();
+      showToast('🗑️ Eliminado');
     }
   }
 
-  function updateNodeLabel(id, newLabel) {
-    const node = state.nodes.find(n => n.id === id);
-    if (node) {
-      node.label = newLabel || SHAPES[node.type].text;
-      pushHistory();
-      renderDiagram().then(() => selectNode(id));
-    }
-  }
+  // --- BIDIRECTIONAL PARSER (Mermaid Code -> Visual Graph) ---
+  function parseAndApplyMermaidCode(code, triggerToast = true) {
+    if (!code || !code.trim()) return false;
 
-  function updateEdgeLabel(idx, label) {
-    if (idx >= 0 && idx < state.edges.length) {
-      state.edges[idx].label = label;
-      pushHistory();
-      renderDiagram();
-    }
-  }
+    try {
+      const lines = code.split('\n');
+      let detectedDir = state.direction;
+      const nodesMap = new Map();
+      const newEdges = [];
 
-  function updateEdgeStyle(idx, style) {
-    if (idx >= 0 && idx < state.edges.length) {
-      state.edges[idx].style = style;
-      pushHistory();
-      renderDiagram();
-    }
-  }
+      // Helper to register / extract node
+      function ensureNode(id, shape = 'process', label = null) {
+        if (!id) return;
+        id = id.trim();
+        if (!id) return;
+        
+        // Clean ID (remove spaces or punctuation)
+        const cleanId = id.replace(/["']/g, '');
 
-  // ── Quick Add Branches ──
-  function quickAddBranch(fromId, condition) {
-    const from = state.nodes.find(n => n.id === fromId);
-    if (!from) return;
-    const newNode = { id: nextId(), type: 'process', label: condition ? `Acción ${condition}` : 'Siguiente Paso' };
-    state.nodes.push(newNode);
-    state.edges.push({ from: fromId, to: newNode.id, label: condition || '', style: 'normal' });
-    deselect();
-    pushHistory();
-    renderDiagram().then(() => selectNode(newNode.id));
-  }
+        if (!nodesMap.has(cleanId)) {
+          let nodeColor = 'sky';
+          if (shape === 'terminal') nodeColor = 'emerald';
+          else if (shape === 'decision') nodeColor = 'amber';
+          else if (shape === 'database') nodeColor = 'purple';
+          else if (shape === 'io') nodeColor = 'cyan';
+          else if (shape === 'subroutine') nodeColor = 'purple';
 
-  // ── Mermaid Code Generator ──
-  function generateCode() {
-    if (state.nodes.length === 0) return `flowchart ${state.direction}\n    %% Diagrama vacío`;
-    let code = `flowchart ${state.direction}\n`;
-    state.nodes.forEach(n => {
-      const s = SHAPES[n.type] || SHAPES.process;
-      const lbl = (n.label || 'Nodo').replace(/"/g, "'").replace(/\n/g, '<br/>');
-      code += `    ${n.id}${s.prefix}"${lbl}"${s.suffix}\n`;
-    });
-    if (state.edges.length > 0) {
-      code += '\n';
-      state.edges.forEach(e => {
-        let arr = '-->';
-        if (e.style === 'thick') arr = '==>';
-        else if (e.style === 'dotted') arr = '-.->';
-        const lbl = (e.label || '').trim();
-        if (lbl) {
-          const clean = lbl.replace(/"/g, "'");
-          code += `    ${e.from} ${arr}|"${clean}"| ${e.to}\n`;
+          // Check if node already existed in previous state to preserve coordinates
+          const existing = state.nodes.find(n => n.id === cleanId);
+
+          nodesMap.set(cleanId, {
+            id: cleanId,
+            shape: shape,
+            color: existing ? existing.color : nodeColor,
+            label: label !== null ? cleanLabel(label) : (existing ? existing.label : cleanId),
+            x: existing ? existing.x : 0,
+            y: existing ? existing.y : 0,
+            width: shape === 'decision' ? 150 : 140,
+            height: shape === 'decision' ? 60 : 52
+          });
         } else {
-          code += `    ${e.from} ${arr} ${e.to}\n`;
+          const n = nodesMap.get(cleanId);
+          if (label !== null) n.label = cleanLabel(label);
+          if (shape !== 'process') n.shape = shape;
+        }
+      }
+
+      function cleanLabel(str) {
+        return str
+          .replace(/^["']|["']$/g, '')
+          .replace(/<br\s*[\/]?>/gi, '\n')
+          .trim();
+      }
+
+      // 1. Process line by line
+      for (let rawLine of lines) {
+        let line = rawLine.trim();
+        if (!line || line.startsWith('%%') || line.startsWith('subgraph') || line === 'end' || line.startsWith('classDef') || line.startsWith('class ') || line.startsWith('style ')) {
+          continue;
+        }
+
+        // Detect flowchart / graph direction
+        const dirMatch = line.match(/^(?:flowchart|graph)\s+(TD|TB|LR|BT|RL)/i);
+        if (dirMatch) {
+          const d = dirMatch[1].toUpperCase();
+          detectedDir = (d === 'TB') ? 'TD' : d;
+          continue;
+        }
+
+        // Extract full node definitions like: A([Inicio]) or B{"¿Es válido?"}
+        // Shapes in order of pattern specificity:
+        // Subroutine: [[...]]
+        // Terminal: ([...])
+        // Database: [(...)]
+        // IO: [/.../] or [\...\]
+        // Decision: {...}
+        // Process: [...]
+        const shapeRegex = /([a-zA-Z0-9_]+)\s*(?:(\[\[(.*?)\]\])|(\(\[(.*?)\]\))|(\[\((.*?)\)\])|(\[\/(.*?)\/\])|(\[\\(.*?)\\\])|(\{(.*?)\})|(\[(.*?)\]))/g;
+        let match;
+        while ((match = shapeRegex.exec(line)) !== null) {
+          const id = match[1];
+          let shape = 'process';
+          let label = id;
+
+          if (match[2] !== undefined) { shape = 'subroutine'; label = match[3]; }
+          else if (match[4] !== undefined) { shape = 'terminal'; label = match[5]; }
+          else if (match[6] !== undefined) { shape = 'database'; label = match[7]; }
+          else if (match[8] !== undefined) { shape = 'io'; label = match[9]; }
+          else if (match[10] !== undefined) { shape = 'io'; label = match[11]; }
+          else if (match[12] !== undefined) { shape = 'decision'; label = match[13]; }
+          else if (match[14] !== undefined) { shape = 'process'; label = match[15]; }
+
+          ensureNode(id, shape, label);
+        }
+
+        // Extract connection syntax like: A --> B, A -- Sí --> B, A -->|Sí| B, A ==> B, A -.-> B
+        // Split line by connectors while capturing connector type & label
+        const connRegex = /(-->|==>|-\.->|---|--\s*["']?(.*?)["']?\s*-->|==\s*["']?(.*?)["']?\s*==>|-\.\s*["']?(.*?)["']?\s*\.->|-->\|(.*?)\||==>\|(.*?)\|/g;
+
+        // Check if line contains connections
+        if (connRegex.test(line)) {
+          // Re-scan connection segments
+          const segments = line.split(/\s*(?:-->|==>|-\.->|---|--.*?-->|==.*?==>|-\..*?\.->|-->\|.*?\||==>\|.*?\|)\s*/);
+          const connectors = [...line.matchAll(/(-->|==>|-\.->|---|--\s*(?:["']?(.*?)["']?)\s*-->|==\s*(?:["']?(.*?)["']?)\s*==>|-\.\s*(?:["']?(.*?)["']?)\s*\.->|-->\|(.*?)\||==>\|(.*?)\|)/g)];
+
+          if (segments.length >= 2 && connectors.length >= 1) {
+            for (let i = 0; i < connectors.length; i++) {
+              const srcRaw = segments[i].trim();
+              const tgtRaw = segments[i + 1].trim();
+              const connMatch = connectors[i];
+
+              // Clean IDs from shapes if attached
+              const srcId = srcRaw.replace(/[\[\(\{\/\\].*$/, '').trim();
+              const tgtId = tgtRaw.replace(/[\[\(\{\/\\].*$/, '').trim();
+
+              if (srcId && tgtId) {
+                ensureNode(srcId);
+                ensureNode(tgtId);
+
+                let style = 'normal';
+                let edgeLabel = '';
+
+                const fullConn = connMatch[0];
+                if (fullConn.includes('==>')) style = 'thick';
+                else if (fullConn.includes('-.->') || fullConn.includes('.-')) style = 'dotted';
+                else if (fullConn.includes('---')) style = 'open';
+
+                // Extract label
+                if (connMatch[2]) edgeLabel = connMatch[2];
+                else if (connMatch[3]) edgeLabel = connMatch[3];
+                else if (connMatch[4]) edgeLabel = connMatch[4];
+                else if (connMatch[5]) edgeLabel = connMatch[5];
+                else if (connMatch[6]) edgeLabel = connMatch[6];
+
+                newEdges.push({
+                  id: `edge_${srcId}_${tgtId}_${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 4)}`,
+                  from: srcId,
+                  to: tgtId,
+                  fromPort: 'bottom',
+                  toPort: 'top',
+                  label: cleanLabel(edgeLabel),
+                  style: style
+                });
+              }
+            }
+          }
+        }
+      }
+
+      if (nodesMap.size === 0) return false;
+
+      // Apply to state
+      state.direction = detectedDir;
+      if (dom.selectDirection) dom.selectDirection.value = detectedDir;
+
+      const parsedNodes = Array.from(nodesMap.values());
+      state.nodes = parsedNodes;
+      state.edges = newEdges;
+
+      render();
+      autoLayout(true);
+      saveState(false); // Don't overwrite the user's textarea immediately
+
+      if (dom.syncStatus) {
+        dom.syncStatus.textContent = '⚡ Sincronizado';
+        dom.syncStatus.style.color = '#10b981';
+      }
+
+      if (triggerToast) {
+        showToast(`✨ ${parsedNodes.length} nodos y ${newEdges.length} conexiones importados`);
+      }
+      return true;
+
+    } catch (err) {
+      console.warn('Error parsing Mermaid code:', err);
+      if (dom.syncStatus) {
+        dom.syncStatus.textContent = '✍️ Escribiendo...';
+        dom.syncStatus.style.color = '#f59e0b';
+      }
+      return false;
+    }
+  }
+
+  // --- SMART HIERARCHICAL AUTO-LAYOUT (Sugiyama Algorithm) ---
+  function autoLayout(animate = true) {
+    if (state.nodes.length === 0) return;
+
+    const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
+    const isReversed = state.direction === 'BT' || state.direction === 'RL';
+
+    const inDegree = {};
+    const adj = {};
+    state.nodes.forEach(n => {
+      inDegree[n.id] = 0;
+      adj[n.id] = [];
+    });
+
+    state.edges.forEach(e => {
+      if (adj[e.from] && inDegree[e.to] !== undefined) {
+        adj[e.from].push(e.to);
+        inDegree[e.to] = (inDegree[e.to] || 0) + 1;
+      }
+    });
+
+    const ranks = {};
+    const queue = [];
+
+    state.nodes.forEach(n => {
+      if (inDegree[n.id] === 0) {
+        ranks[n.id] = 0;
+        queue.push(n.id);
+      }
+    });
+
+    if (queue.length === 0 && state.nodes.length > 0) {
+      ranks[state.nodes[0].id] = 0;
+      queue.push(state.nodes[0].id);
+    }
+
+    let maxRank = 0;
+    const visited = new Set();
+    while (queue.length > 0) {
+      const u = queue.shift();
+      visited.add(u);
+      const currentRank = ranks[u] || 0;
+
+      (adj[u] || []).forEach(v => {
+        const nextRank = currentRank + 1;
+        if (ranks[v] === undefined || nextRank > ranks[v]) {
+          ranks[v] = nextRank;
+          if (nextRank > maxRank) maxRank = nextRank;
+        }
+        if (!visited.has(v)) queue.push(v);
+      });
+    }
+
+    state.nodes.forEach(n => {
+      if (ranks[n.id] === undefined) ranks[n.id] = 0;
+    });
+
+    const layers = [];
+    for (let r = 0; r <= maxRank; r++) layers[r] = [];
+    state.nodes.forEach(n => {
+      const r = ranks[n.id] || 0;
+      layers[r].push(n);
+    });
+
+    const layerSpacing = isHorizontal ? 260 : 130;
+    const nodeSpacing = isHorizontal ? 100 : 200;
+    const startX = 140;
+    const startY = 100;
+
+    const targetPositions = {};
+
+    layers.forEach((layerNodes, r) => {
+      const layerIndex = isReversed ? (layers.length - 1 - r) : r;
+      const totalSpan = (layerNodes.length - 1) * nodeSpacing;
+
+      layerNodes.forEach((node, i) => {
+        const offset = (i * nodeSpacing) - (totalSpan / 2);
+        if (isHorizontal) {
+          targetPositions[node.id] = {
+            x: startX + (layerIndex * layerSpacing),
+            y: startY + 220 + offset
+          };
+        } else {
+          targetPositions[node.id] = {
+            x: startX + 380 + offset,
+            y: startY + (layerIndex * layerSpacing)
+          };
+        }
+      });
+    });
+
+    if (animate) {
+      animateLayout(targetPositions);
+    } else {
+      state.nodes.forEach(node => {
+        if (targetPositions[node.id]) {
+          node.x = targetPositions[node.id].x;
+          node.y = targetPositions[node.id].y;
+        }
+      });
+      render();
+      saveState();
+    }
+  }
+
+  function animateLayout(targetPositions) {
+    const startTime = performance.now();
+    const duration = 260;
+    const initialPositions = {};
+
+    state.nodes.forEach(node => {
+      initialPositions[node.id] = { x: node.x, y: node.y };
+    });
+
+    function step(now) {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const ease = 1 - Math.pow(1 - progress, 3);
+
+      state.nodes.forEach(node => {
+        const initial = initialPositions[node.id];
+        const target = targetPositions[node.id];
+        if (initial && target) {
+          node.x = initial.x + (target.x - initial.x) * ease;
+          node.y = initial.y + (target.y - initial.y) * ease;
+        }
+      });
+
+      render();
+      if (state.selectedNodeId) {
+        const sel = state.nodes.find(n => n.id === state.selectedNodeId);
+        if (sel) positionNodeToolbar(sel);
+      }
+
+      if (progress < 1) {
+        requestAnimationFrame(step);
+      } else {
+        saveState();
+      }
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  // --- MERMAID CODE GENERATOR ---
+  function generateMermaidCode() {
+    if (state.nodes.length === 0) {
+      return `flowchart ${state.direction}\n    %% Diagrama vacío - Agrega formas desde la barra superior`;
+    }
+
+    let code = `flowchart ${state.direction}\n`;
+    code += `    %% Nodos\n`;
+    state.nodes.forEach(node => {
+      const shapeDef = SHAPES[node.shape] || SHAPES.process;
+      const cleanLabel = (node.label || 'Nodo')
+        .replace(/"/g, "'")
+        .replace(/\n/g, '<br/>');
+      code += `    ${node.id}${shapeDef.prefix}"${cleanLabel}"${shapeDef.suffix}\n`;
+    });
+
+    if (state.edges.length > 0) {
+      code += `\n    %% Conexiones\n`;
+      state.edges.forEach(edge => {
+        let connector = '-->';
+        if (edge.style === 'dotted') connector = '-.->';
+        else if (edge.style === 'thick') connector = '==>';
+        else if (edge.style === 'open') connector = '---';
+
+        const label = (edge.label || '').trim();
+        if (label) {
+          const clean = label.replace(/"/g, "'");
+          if (edge.style === 'normal' || !edge.style) {
+            code += `    ${edge.from} -- "${clean}" --> ${edge.to}\n`;
+          } else {
+            code += `    ${edge.from} ${connector}|"${clean}"| ${edge.to}\n`;
+          }
+        } else {
+          code += `    ${edge.from} ${connector} ${edge.to}\n`;
         }
       });
     }
+
     return code;
   }
 
-  function updateCode() {
-    if (dom.codeArea) dom.codeArea.value = generateCode();
+  function updateMermaidCode() {
+    if (dom.mermaidCode && !state.isTypingCode) {
+      dom.mermaidCode.value = generateMermaidCode();
+      if (dom.syncStatus) {
+        dom.syncStatus.textContent = '⚡ Sincronizado';
+        dom.syncStatus.style.color = '#10b981';
+      }
+    }
   }
 
   function updateStats() {
@@ -286,597 +700,817 @@
     if (dom.statEdges) dom.statEdges.textContent = `${state.edges.length} conexiones`;
   }
 
-  // ── Mermaid SVG Rendering ──
-  let renderPromise = null;
-
-  async function renderDiagram() {
-    if (typeof mermaid === 'undefined') return;
-    const code = generateCode();
-    updateCode();
-    updateStats();
-
-    renderCounter++;
-    const id = `mf_${renderCounter}`;
-
-    try {
-      const { svg } = await mermaid.render(id, code);
-      dom.container.innerHTML = svg;
-      attachSvgHandlers();
-      applySelection();
-    } catch (err) {
-      console.warn('Mermaid render error:', err);
-      dom.container.innerHTML = `<div class="empty-state"><h2>Diagrama actualizándose...</h2><p>Agrega nodos para continuar.</p></div>`;
-    }
+  // --- RENDERING CANVAS ---
+  function render() {
+    renderNodes();
+    renderEdges();
   }
 
-  // ── SVG Interaction Handlers ──
-  function attachSvgHandlers() {
-    const svg = dom.container.querySelector('svg');
-    if (!svg) return;
+  function renderNodes() {
+    if (!dom.nodesLayer) return;
+    dom.nodesLayer.innerHTML = '';
 
-    // Nodes
-    const nodeEls = svg.querySelectorAll('.node');
-    nodeEls.forEach(nodeEl => {
-      const nodeId = extractNodeId(nodeEl);
-      if (!nodeId) return;
+    state.nodes.forEach(node => {
+      const shapeDef = SHAPES[node.shape] || SHAPES.process;
+      const isSelected = state.selectedNodeId === node.id;
+      const isEditing = state.editingNodeId === node.id;
 
-      nodeEl.style.cursor = 'pointer';
+      const nodeEl = document.createElement('div');
+      nodeEl.className = `canvas-node ${shapeDef.className} color-${node.color || 'emerald'} ${isSelected ? 'selected' : ''}`;
+      nodeEl.style.left = `${node.x}px`;
+      nodeEl.style.top = `${node.y}px`;
+      nodeEl.dataset.id = node.id;
 
-      nodeEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (state.connectFromId) {
-          finishConnect(nodeId);
-        } else {
-          selectNode(nodeId);
-        }
-      });
-
-      nodeEl.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        startInlineEdit(nodeId, nodeEl);
-      });
-    });
-
-    // Edges (paths) — use index mapping
-    const edgePaths = svg.querySelectorAll('.edgePath');
-    edgePaths.forEach((epEl, idx) => {
-      if (idx >= state.edges.length) return;
-      const pathEl = epEl.querySelector('path');
-      if (pathEl) {
-        pathEl.style.cursor = 'pointer';
-        // Add invisible fat hit area
-        const hit = pathEl.cloneNode();
-        hit.setAttribute('stroke', 'transparent');
-        hit.setAttribute('stroke-width', '20');
-        hit.style.pointerEvents = 'stroke';
-        hit.style.cursor = 'pointer';
-        hit.style.fill = 'none';
-        epEl.insertBefore(hit, pathEl);
-
-        const handler = (e) => {
-          e.stopPropagation();
-          selectEdge(idx, e);
-        };
-        hit.addEventListener('click', handler);
-        pathEl.addEventListener('click', handler);
-      }
-    });
-
-    // Edge Labels
-    const edgeLabels = svg.querySelectorAll('.edgeLabel');
-    edgeLabels.forEach((elEl, idx) => {
-      if (idx >= state.edges.length) return;
-      elEl.style.cursor = 'pointer';
-      elEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectEdge(idx, e);
-      });
-    });
-
-    // Click on background → deselect
-    svg.addEventListener('click', (e) => {
-      if (e.target === svg || e.target.closest('.node') === null && e.target.closest('.edgePath') === null && e.target.closest('.edgeLabel') === null) {
-        deselect();
-        cancelConnect();
-      }
-    });
-  }
-
-  function extractNodeId(svgNode) {
-    const id = svgNode.id || '';
-    const m = id.match(/^flowchart-(.+)-\d+$/);
-    return m ? m[1] : null;
-  }
-
-  function findSvgNode(nodeId) {
-    const svg = dom.container.querySelector('svg');
-    if (!svg) return null;
-    const nodes = svg.querySelectorAll('.node');
-    for (const n of nodes) {
-      if (extractNodeId(n) === nodeId) return n;
-    }
-    return null;
-  }
-
-  // ── Selection ──
-  function selectNode(nodeId) {
-    const node = state.nodes.find(n => n.id === nodeId);
-    if (!node) return;
-
-    state.selectedNodeId = nodeId;
-    state.selectedEdgeIdx = null;
-    hideEdgePopover();
-    applySelection();
-    showActionBar(node);
-  }
-
-  function selectEdge(idx, evt) {
-    if (idx < 0 || idx >= state.edges.length) return;
-    state.selectedEdgeIdx = idx;
-    state.selectedNodeId = null;
-    hideActionBar();
-    applySelection();
-    showEdgePopover(idx, evt);
-  }
-
-  function deselect() {
-    state.selectedNodeId = null;
-    state.selectedEdgeIdx = null;
-    hideActionBar();
-    hideEdgePopover();
-    hideInlineEditor();
-    applySelection();
-  }
-
-  function applySelection() {
-    const svg = dom.container.querySelector('svg');
-    if (!svg) return;
-
-    // Clear all selections
-    svg.querySelectorAll('.mf-selected').forEach(el => el.classList.remove('mf-selected'));
-
-    // Highlight selected node
-    if (state.selectedNodeId) {
-      const nodeEl = findSvgNode(state.selectedNodeId);
-      if (nodeEl) nodeEl.classList.add('mf-selected');
-    }
-
-    // Highlight selected edge
-    if (state.selectedEdgeIdx !== null) {
-      const edgePaths = svg.querySelectorAll('.edgePath');
-      if (edgePaths[state.selectedEdgeIdx]) {
-        edgePaths[state.selectedEdgeIdx].classList.add('mf-selected');
-      }
-    }
-  }
-
-  // ── Node Action Bar ──
-  function showActionBar(node) {
-    const svgNode = findSvgNode(node.id);
-    if (!svgNode) return;
-
-    // Build contextual buttons
-    let html = '';
-    html += `<button class="nab-btn nab-edit" data-act="edit">✏️ Editar</button>`;
-    html += `<button class="nab-btn nab-connect" data-act="connect">🔗 Conectar</button>`;
-
-    if (node.type === 'decision') {
-      html += `<button class="nab-btn nab-yes" data-act="yes">✔ +Sí</button>`;
-      html += `<button class="nab-btn nab-no" data-act="no">✖ +No</button>`;
-    } else {
-      html += `<button class="nab-btn nab-next" data-act="next">➕ +Siguiente</button>`;
-    }
-
-    html += `<button class="nab-btn nab-del" data-act="delete">🗑️</button>`;
-
-    dom.actionBar.innerHTML = html;
-    dom.actionBar.classList.add('visible');
-
-    // Position above the node
-    const nodeRect = svgNode.getBoundingClientRect();
-    const wsRect = dom.workspace.getBoundingClientRect();
-    let x = nodeRect.left + nodeRect.width / 2 - wsRect.left;
-    let y = nodeRect.top - wsRect.top - 8;
-
-    // Get action bar width after rendering
-    const barW = dom.actionBar.offsetWidth;
-    x -= barW / 2;
-    if (x < 4) x = 4;
-    if (x + barW > wsRect.width - 4) x = wsRect.width - barW - 4;
-    if (y < 4) y = nodeRect.bottom - wsRect.top + 8;
-
-    dom.actionBar.style.left = x + 'px';
-    dom.actionBar.style.top = y + 'px';
-
-    // Wire action buttons
-    dom.actionBar.querySelectorAll('.nab-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleNodeAction(node.id, btn.dataset.act);
-      });
-    });
-  }
-
-  function hideActionBar() {
-    dom.actionBar.classList.remove('visible');
-  }
-
-  function handleNodeAction(nodeId, action) {
-    switch (action) {
-      case 'edit':
-        const svgNode = findSvgNode(nodeId);
-        if (svgNode) startInlineEdit(nodeId, svgNode);
-        break;
-      case 'connect':
-        startConnect(nodeId);
-        break;
-      case 'yes':
-        quickAddBranch(nodeId, 'Sí');
-        break;
-      case 'no':
-        quickAddBranch(nodeId, 'No');
-        break;
-      case 'next':
-        quickAddBranch(nodeId, '');
-        break;
-      case 'delete':
-        deleteNode(nodeId);
-        break;
-    }
-  }
-
-  // ── Connect Mode ──
-  function startConnect(fromId) {
-    state.connectFromId = fromId;
-    dom.workspace.classList.add('connect-mode');
-    dom.connectBanner.classList.add('visible');
-    hideActionBar();
-    toast('🔗 Clic en el nodo destino para conectar');
-  }
-
-  function finishConnect(toId) {
-    if (state.connectFromId && state.connectFromId !== toId) {
-      const fromNode = state.nodes.find(n => n.id === state.connectFromId);
-      addEdge(state.connectFromId, toId);
-
-      // If from a decision, auto-show edge popover
-      if (fromNode && fromNode.type === 'decision') {
-        const edgeIdx = state.edges.length - 1;
-        setTimeout(() => selectEdge(edgeIdx, null), 100);
-      }
-    }
-    cancelConnect();
-  }
-
-  function cancelConnect() {
-    state.connectFromId = null;
-    dom.workspace.classList.remove('connect-mode');
-    dom.connectBanner.classList.remove('visible');
-  }
-
-  // ── Inline Text Editing ──
-  function startInlineEdit(nodeId, svgNode) {
-    const node = state.nodes.find(n => n.id === nodeId);
-    if (!node) return;
-
-    hideActionBar();
-
-    const nodeRect = svgNode.getBoundingClientRect();
-    const wsRect = dom.workspace.getBoundingClientRect();
-
-    const editor = dom.inlineEditor;
-    editor.value = node.label;
-    editor.style.display = 'block';
-    editor.style.left = (nodeRect.left - wsRect.left) + 'px';
-    editor.style.top = (nodeRect.top - wsRect.top) + 'px';
-    editor.style.width = Math.max(nodeRect.width + 20, 120) + 'px';
-    editor.style.height = nodeRect.height + 'px';
-    editor.focus();
-    editor.select();
-
-    const finish = () => {
-      const newLabel = editor.value.trim();
-      hideInlineEditor();
-      if (newLabel && newLabel !== node.label) {
-        updateNodeLabel(nodeId, newLabel);
+      if (isEditing) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'node-inline-input';
+        input.value = node.label;
+        input.addEventListener('blur', () => {
+          node.label = input.value.trim() || shapeDef.defaultText;
+          state.editingNodeId = null;
+          render();
+          saveState();
+          positionNodeToolbar(node);
+        });
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') input.blur();
+          if (e.key === 'Escape') {
+            state.editingNodeId = null;
+            render();
+            positionNodeToolbar(node);
+          }
+        });
+        nodeEl.appendChild(input);
+        setTimeout(() => { input.focus(); input.select(); }, 10);
       } else {
-        selectNode(nodeId);
+        const labelDiv = document.createElement('div');
+        labelDiv.className = 'node-label-view';
+        labelDiv.innerHTML = (node.label || shapeDef.defaultText).replace(/\n/g, '<br/>');
+        nodeEl.appendChild(labelDiv);
       }
-    };
 
-    // Remove old listeners to avoid duplicates
-    const newEditor = editor.cloneNode(true);
-    editor.parentNode.replaceChild(newEditor, editor);
-    dom.inlineEditor = newEditor;
+      ['top', 'right', 'bottom', 'left'].forEach(portPos => {
+        const port = document.createElement('div');
+        port.className = `node-port port-${portPos}`;
+        port.dataset.port = portPos;
+        port.dataset.nodeId = node.id;
+        nodeEl.appendChild(port);
+      });
 
-    newEditor.value = node.label;
-    newEditor.style.display = 'block';
-    newEditor.style.left = (nodeRect.left - wsRect.left) + 'px';
-    newEditor.style.top = (nodeRect.top - wsRect.top) + 'px';
-    newEditor.style.width = Math.max(nodeRect.width + 20, 120) + 'px';
-    newEditor.style.height = nodeRect.height + 'px';
-    newEditor.focus();
-    newEditor.select();
-
-    newEditor.addEventListener('blur', finish);
-    newEditor.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); newEditor.blur(); }
-      if (e.key === 'Escape') { newEditor.value = node.label; newEditor.blur(); }
+      dom.nodesLayer.appendChild(nodeEl);
     });
   }
 
-  function hideInlineEditor() {
-    dom.inlineEditor.style.display = 'none';
+  function renderEdges() {
+    if (!dom.edgesLayer) return;
+    dom.edgesLayer.innerHTML = '';
+
+    state.edges.forEach(edge => {
+      const fromNode = state.nodes.find(n => n.id === edge.from);
+      const toNode = state.nodes.find(n => n.id === edge.to);
+      if (!fromNode || !toNode) return;
+
+      const p1 = getPortCoordinates(fromNode, edge.fromPort || 'bottom');
+      const p2 = getPortCoordinates(toNode, edge.toPort || 'top');
+      const isSelected = state.selectedEdgeId === edge.id;
+
+      const pathStr = calculateSmoothPath(p1, p2, edge.fromPort, edge.toPort);
+
+      // 1. Hit path for smooth clicks
+      const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      hitPath.setAttribute('d', pathStr);
+      hitPath.setAttribute('class', 'edge-hit-path');
+      hitPath.dataset.edgeId = edge.id;
+      dom.edgesLayer.appendChild(hitPath);
+
+      // 2. Visible line
+      const linePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      linePath.setAttribute('d', pathStr);
+      linePath.setAttribute('class', `edge-line-path ${edge.style || 'normal'} ${isSelected ? 'selected' : ''}`);
+      linePath.setAttribute('marker-end', isSelected ? 'url(#arrow-selected)' : 'url(#arrow-default)');
+      linePath.dataset.edgeId = edge.id;
+      dom.edgesLayer.appendChild(linePath);
+
+      // 3. Label Badge
+      const labelText = (edge.label || '').trim();
+      const mid = getPathMidpoint(p1, p2);
+
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'edge-badge-group');
+      g.dataset.edgeId = edge.id;
+
+      let badgeClass = 'edge-badge-bg';
+      if (labelText.toLowerCase() === 'sí' || labelText.toLowerCase() === 'si') badgeClass += ' label-yes';
+      if (labelText.toLowerCase() === 'no') badgeClass += ' label-no';
+      if (labelText.toLowerCase() === 'ok') badgeClass += ' label-ok';
+
+      const displayStr = labelText || (isSelected ? '+ Condición' : '');
+      if (displayStr) {
+        const textLen = Math.max(displayStr.length * 7.5 + 16, 36);
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', mid.x - textLen / 2);
+        rect.setAttribute('y', mid.y - 11);
+        rect.setAttribute('width', textLen);
+        rect.setAttribute('height', 22);
+        rect.setAttribute('class', badgeClass);
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', mid.x);
+        text.setAttribute('y', mid.y);
+        text.setAttribute('class', 'edge-badge-text');
+        text.textContent = displayStr;
+
+        g.appendChild(rect);
+        g.appendChild(text);
+        dom.edgesLayer.appendChild(g);
+      }
+    });
   }
 
-  // ── Edge Popover ──
-  function showEdgePopover(idx, evt) {
-    const edge = state.edges[idx];
-    if (!edge) return;
+  function getPortCoordinates(node, port) {
+    const w = node.width || 140;
+    const h = node.height || 52;
+    switch (port) {
+      case 'top': return { x: node.x + w / 2, y: node.y };
+      case 'bottom': return { x: node.x + w / 2, y: node.y + h };
+      case 'left': return { x: node.x, y: node.y + h / 2 };
+      case 'right': return { x: node.x + w, y: node.y + h / 2 };
+      default: return { x: node.x + w / 2, y: node.y + h };
+    }
+  }
 
-    dom.edgeLabelIn.value = edge.label || '';
-    dom.edgeStyleSel.value = edge.style || 'normal';
+  function calculateSmoothPath(p1, p2, fromPort, toPort) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const curvature = Math.min(dist * 0.45, 80);
 
-    const wsRect = dom.workspace.getBoundingClientRect();
-    let x, y;
+    let cx1 = p1.x;
+    let cy1 = p1.y;
+    let cx2 = p2.x;
+    let cy2 = p2.y;
 
-    if (evt) {
-      x = evt.clientX - wsRect.left + 12;
-      y = evt.clientY - wsRect.top - 10;
-    } else {
-      // Fallback: center of workspace
-      x = wsRect.width / 2 - 125;
-      y = wsRect.height / 2 - 80;
+    if (fromPort === 'bottom') cy1 += curvature;
+    else if (fromPort === 'top') cy1 -= curvature;
+    else if (fromPort === 'left') cx1 -= curvature;
+    else if (fromPort === 'right') cx1 += curvature;
+
+    if (toPort === 'bottom') cy2 += curvature;
+    else if (toPort === 'top') cy2 -= curvature;
+    else if (toPort === 'left') cx2 -= curvature;
+    else if (toPort === 'right') cx2 += curvature;
+
+    return `M ${p1.x} ${p1.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${p2.x} ${p2.y}`;
+  }
+
+  function getPathMidpoint(p1, p2) {
+    return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+  }
+
+  // --- FLOATING TOOLBARS ---
+  function positionNodeToolbar(node) {
+    if (!dom.nodeToolbar || !node) return;
+
+    if (dom.nodeBranchActions) {
+      if (node.shape === 'decision') {
+        dom.nodeBranchActions.innerHTML = `
+          <button class="tool-btn tool-btn-yes" data-act="yes">🟢 + Sí</button>
+          <button class="tool-btn tool-btn-no" data-act="no">🔴 + No</button>
+        `;
+      } else {
+        dom.nodeBranchActions.innerHTML = `
+          <button class="tool-btn tool-btn-next" data-act="next">➕ + Siguiente</button>
+        `;
+      }
     }
 
-    if (x + 260 > wsRect.width) x = wsRect.width - 270;
-    if (y + 200 > wsRect.height) y = wsRect.height - 210;
-    if (x < 8) x = 8;
-    if (y < 8) y = 8;
+    const nodeWidth = node.width || 140;
+    const screenX = (node.x + nodeWidth / 2) * state.zoom + state.pan.x;
+    const screenY = node.y * state.zoom + state.pan.y - 44;
 
-    dom.edgePopover.style.left = x + 'px';
-    dom.edgePopover.style.top = y + 'px';
+    dom.nodeToolbar.style.left = `${screenX}px`;
+    dom.nodeToolbar.style.top = `${screenY}px`;
+    dom.nodeToolbar.style.transform = 'translateX(-50%)';
+    dom.nodeToolbar.classList.add('visible');
+  }
+
+  function hideNodeToolbar() {
+    if (dom.nodeToolbar) dom.nodeToolbar.classList.remove('visible');
+  }
+
+  function showEdgePopoverForEdge(edge, clientX, clientY) {
+    if (!dom.edgePopover || !edge) return;
+
+    if (dom.edgeTextInput) dom.edgeTextInput.value = edge.label || '';
+    if (dom.edgeStylePicker) dom.edgeStylePicker.value = edge.style || 'normal';
+
+    const rect = dom.viewport.getBoundingClientRect();
+    let popX = 0;
+    let popY = 0;
+
+    if (clientX !== undefined && clientY !== undefined) {
+      popX = clientX - rect.left + 15;
+      popY = clientY - rect.top - 15;
+    } else {
+      const fromNode = state.nodes.find(n => n.id === edge.from);
+      const toNode = state.nodes.find(n => n.id === edge.to);
+      if (fromNode && toNode) {
+        const mid = getPathMidpoint(
+          getPortCoordinates(fromNode, edge.fromPort || 'bottom'),
+          getPortCoordinates(toNode, edge.toPort || 'top')
+        );
+        popX = mid.x * state.zoom + state.pan.x + 15;
+        popY = mid.y * state.zoom + state.pan.y - 30;
+      }
+    }
+
+    if (popX + 270 > rect.width) popX = rect.width - 280;
+    if (popY + 200 > rect.height) popY = rect.height - 210;
+    if (popX < 10) popX = 10;
+    if (popY < 10) popY = 10;
+
+    dom.edgePopover.style.left = `${popX}px`;
+    dom.edgePopover.style.top = `${popY}px`;
     dom.edgePopover.classList.add('visible');
   }
 
   function hideEdgePopover() {
-    dom.edgePopover.classList.remove('visible');
+    if (dom.edgePopover) dom.edgePopover.classList.remove('visible');
   }
 
-  // ── Event Wiring ──
-  function wireEvents() {
-    // Palette
-    document.querySelectorAll('.palette-card').forEach(card => {
-      card.addEventListener('click', () => addNode(card.dataset.type));
+  // --- EVENT LISTENERS ---
+  function setupEventListeners() {
+    window.addEventListener('resize', updateWorldTransform);
+    window.addEventListener('keydown', handleKeyboard);
+
+    // Canvas Mouse & Touch
+    dom.viewport.addEventListener('wheel', handleWheel, { passive: false });
+    dom.viewport.addEventListener('mousedown', handleCanvasMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    // Double Click on Canvas Background -> Create node instantly right there
+    dom.viewport.addEventListener('dblclick', (e) => {
+      if (e.target === dom.viewport || e.target.id === 'svg-canvas' || e.target.id === 'canvas-world') {
+        const pt = screenToWorld(e.clientX, e.clientY);
+        createNode('process', pt.x - 70, pt.y - 26);
+      }
     });
 
-    // Header buttons
-    dom.btnCopy.addEventListener('click', copyCode);
+    // Top Header Buttons
+    dom.btnUndo.addEventListener('click', undo);
+    dom.btnRedo.addEventListener('click', redo);
     dom.btnClear.addEventListener('click', () => {
-      if (confirm('¿Limpiar todo el diagrama?')) {
-        state.nodes = []; state.edges = [];
-        deselect(); pushHistory(); renderDiagram();
-        toast('Lienzo limpio');
+      if (confirm('¿Limpiar todo el lienzo?')) {
+        state.nodes = [];
+        state.edges = [];
+        state.selectedNodeId = null;
+        state.selectedEdgeId = null;
+        hideNodeToolbar();
+        hideEdgePopover();
+        render();
+        saveState();
+        showToast('Lienzo limpio');
       }
     });
     dom.btnTheme.addEventListener('click', toggleTheme);
-    dom.btnDownload.addEventListener('click', downloadMmd);
+    dom.btnCopy.addEventListener('click', copyMermaidCode);
+    dom.btnDownloadMmd.addEventListener('click', downloadMmd);
 
-    dom.dirSelect.addEventListener('change', (e) => {
-      state.direction = e.target.value;
-      pushHistory();
-      renderDiagram();
-    });
+    // Collapsible Code Panel
+    dom.btnToggleCode.addEventListener('click', toggleCodePanel);
+    dom.btnCloseCode.addEventListener('click', () => setCodePanel(false));
 
-    dom.tplSelect.addEventListener('change', (e) => {
+    // EDITABLE CODE EVENTS (Bidirectional Live Parsing)
+    if (dom.mermaidCode) {
+      dom.mermaidCode.addEventListener('focus', () => {
+        state.isTypingCode = true;
+      });
+
+      dom.mermaidCode.addEventListener('blur', () => {
+        state.isTypingCode = false;
+        parseAndApplyMermaidCode(dom.mermaidCode.value, false);
+      });
+
+      dom.mermaidCode.addEventListener('input', () => {
+        state.isTypingCode = true;
+        if (dom.syncStatus) {
+          dom.syncStatus.textContent = '✍️ Escribiendo...';
+          dom.syncStatus.style.color = '#f59e0b';
+        }
+        clearTimeout(codeDebounceTimer);
+        codeDebounceTimer = setTimeout(() => {
+          parseAndApplyMermaidCode(dom.mermaidCode.value, false);
+          state.isTypingCode = false;
+        }, 450);
+      });
+
+      dom.mermaidCode.addEventListener('paste', () => {
+        setTimeout(() => {
+          parseAndApplyMermaidCode(dom.mermaidCode.value, true);
+        }, 50);
+      });
+    }
+
+    if (dom.btnApplyCode) {
+      dom.btnApplyCode.addEventListener('click', () => {
+        parseAndApplyMermaidCode(dom.mermaidCode.value, true);
+      });
+    }
+
+    // Templates
+    dom.selectTemplate.addEventListener('change', (e) => {
       if (e.target.value) {
         loadTemplate(e.target.value);
         e.target.value = '';
       }
     });
 
-    // Zoom
+    // Direction & Auto Layout
+    dom.selectDirection.addEventListener('change', (e) => {
+      state.direction = e.target.value;
+      autoLayout(true);
+      saveState();
+    });
+    dom.btnAutoLayout.addEventListener('click', () => autoLayout(true));
+
+    // Zoom Controls
     dom.zoomIn.addEventListener('click', () => setZoom(state.zoom + 0.15));
     dom.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.15));
-    dom.zoomFit.addEventListener('click', () => setZoom(1));
+    dom.zoomReset.addEventListener('click', () => {
+      state.zoom = 1;
+      state.pan = { x: 120, y: 100 };
+      updateWorldTransform();
+    });
 
-    dom.scroll.addEventListener('wheel', (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        setZoom(state.zoom + (e.deltaY < 0 ? 0.1 : -0.1));
+    // Node Toolbar Events
+    dom.btnNodeEdit.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.selectedNodeId) {
+        state.editingNodeId = state.selectedNodeId;
+        hideNodeToolbar();
+        render();
       }
-    }, { passive: false });
+    });
 
-    // Edge Popover controls
-    dom.edgePopover.querySelectorAll('.cpill').forEach(pill => {
-      pill.addEventListener('click', (e) => {
+    dom.btnNodeConnect.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.selectedNodeId) startConnectMode(state.selectedNodeId);
+    });
+
+    dom.btnNodeDelete.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteSelected();
+    });
+
+    if (dom.nodeBranchActions) {
+      dom.nodeBranchActions.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tool-btn');
+        if (!btn || !state.selectedNodeId) return;
         e.stopPropagation();
-        if (state.selectedEdgeIdx !== null) {
-          const val = pill.dataset.val;
-          updateEdgeLabel(state.selectedEdgeIdx, val);
-          dom.edgeLabelIn.value = val;
-          toast(val ? `Condición: ${val}` : 'Condición eliminada');
+        const act = btn.dataset.act;
+        if (act === 'yes') quickAddBranch(state.selectedNodeId, 'Sí');
+        else if (act === 'no') quickAddBranch(state.selectedNodeId, 'No');
+        else if (act === 'next') quickAddBranch(state.selectedNodeId, '');
+      });
+    }
+
+    // Edge Popover Controls
+    document.querySelectorAll('.chip-btn').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
+        if (edge) {
+          edge.label = chip.dataset.val;
+          if (dom.edgeTextInput) dom.edgeTextInput.value = edge.label;
+          render();
+          saveState();
+          showToast(edge.label ? `Condición: "${edge.label}"` : 'Sin condición');
         }
       });
     });
 
-    dom.edgeLabelIn.addEventListener('input', () => {
-      if (state.selectedEdgeIdx !== null) {
-        state.edges[state.selectedEdgeIdx].label = dom.edgeLabelIn.value;
-        pushHistory();
-        renderDiagram();
+    dom.edgeTextInput.addEventListener('input', (e) => {
+      const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
+      if (edge) {
+        edge.label = e.target.value;
+        render();
+        saveState();
       }
     });
-    // Prevent clicks inside input from bubbling
-    dom.edgeLabelIn.addEventListener('click', e => e.stopPropagation());
 
-    dom.edgeStyleSel.addEventListener('change', () => {
-      if (state.selectedEdgeIdx !== null) {
-        updateEdgeStyle(state.selectedEdgeIdx, dom.edgeStyleSel.value);
+    dom.edgeStylePicker.addEventListener('change', (e) => {
+      const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
+      if (edge) {
+        edge.style = e.target.value;
+        render();
+        saveState();
       }
     });
-    dom.edgeStyleSel.addEventListener('click', e => e.stopPropagation());
 
-    dom.btnDelEdge.addEventListener('click', (e) => {
+    dom.btnDeleteEdge.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (state.selectedEdgeIdx !== null) {
-        deleteEdge(state.selectedEdgeIdx);
-        toast('Flecha eliminada');
-      }
+      deleteSelected();
     });
 
-    // Cancel connect
-    dom.cancelConnect.addEventListener('click', (e) => {
+    // Cancel Connect Mode
+    dom.btnCancelConnect.addEventListener('click', (e) => {
       e.stopPropagation();
-      cancelConnect();
-    });
-
-    // Click on workspace background → deselect
-    dom.workspace.addEventListener('click', (e) => {
-      if (e.target === dom.workspace || e.target === dom.scroll || e.target === dom.container) {
-        deselect();
-        cancelConnect();
-      }
-    });
-
-    // Prevent popover clicks from deselecting
-    dom.edgePopover.addEventListener('click', e => e.stopPropagation());
-    dom.actionBar.addEventListener('click', e => e.stopPropagation());
-
-    // Keyboard
-    window.addEventListener('keydown', (e) => {
-      if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (state.selectedNodeId) { deleteNode(state.selectedNodeId); toast('Nodo eliminado'); }
-        else if (state.selectedEdgeIdx !== null) { deleteEdge(state.selectedEdgeIdx); toast('Flecha eliminada'); }
-      }
-      if (e.key === 'Escape') { deselect(); cancelConnect(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !window.getSelection().toString()) { e.preventDefault(); copyCode(); }
+      cancelConnectMode();
     });
   }
 
-  // ── Zoom ──
+  function setupDockButtons() {
+    document.querySelectorAll('.dock-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const shape = btn.dataset.shape;
+        const rect = dom.viewport.getBoundingClientRect();
+        const center = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        createNode(shape, center.x - 70, center.y - 26, null, state.activeColor);
+      });
+    });
+
+    document.querySelectorAll('.color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        state.activeColor = swatch.dataset.color;
+
+        if (state.selectedNodeId) {
+          const node = state.nodes.find(n => n.id === state.selectedNodeId);
+          if (node) {
+            node.color = state.activeColor;
+            render();
+            saveState();
+            positionNodeToolbar(node);
+          }
+        }
+      });
+    });
+  }
+
+  // --- MOUSE & TOUCH HANDLERS ---
+  function handleCanvasMouseDown(e) {
+    if (e.target.classList.contains('node-port')) {
+      e.stopPropagation();
+      const nodeId = e.target.dataset.nodeId;
+      const port = e.target.dataset.port;
+      const node = state.nodes.find(n => n.id === nodeId);
+      if (node) {
+        state.connectingFrom = { nodeId, port };
+        const p = getPortCoordinates(node, port);
+        dom.tempLine.style.display = 'block';
+        dom.tempLine.setAttribute('d', `M ${p.x} ${p.y} L ${p.x} ${p.y}`);
+      }
+      return;
+    }
+
+    const nodeEl = e.target.closest('.canvas-node');
+    if (nodeEl) {
+      e.stopPropagation();
+      const nodeId = nodeEl.dataset.id;
+
+      if (state.connectModeFromId) {
+        finishConnectMode(nodeId);
+        return;
+      }
+
+      if (state.selectedNodeId === nodeId && e.detail === 2) {
+        state.editingNodeId = nodeId;
+        hideNodeToolbar();
+        render();
+        return;
+      }
+
+      state.selectedNodeId = nodeId;
+      state.selectedEdgeId = null;
+      hideEdgePopover();
+      state.dragNodeId = nodeId;
+      state.dragStart = { x: e.clientX, y: e.clientY };
+      const n = state.nodes.find(nod => nod.id === nodeId);
+      state.nodeStartPos = { x: n.x, y: n.y };
+      render();
+      positionNodeToolbar(n);
+      return;
+    }
+
+    const edgeHit = e.target.closest('.edge-hit-path') || e.target.closest('.edge-badge-group');
+    if (edgeHit) {
+      e.stopPropagation();
+      const edgeId = edgeHit.dataset.edgeId;
+      selectEdge(edgeId, e.clientX, e.clientY);
+      return;
+    }
+
+    if (e.target.closest('#node-floating-toolbar') || e.target.closest('#edge-floating-popover') || e.target.closest('#floating-dock') || e.target.closest('#sidebar-code')) {
+      return;
+    }
+
+    state.selectedNodeId = null;
+    state.selectedEdgeId = null;
+    state.editingNodeId = null;
+    hideNodeToolbar();
+    hideEdgePopover();
+    cancelConnectMode();
+    render();
+
+    state.isPanning = true;
+    state.panStart = { x: e.clientX - state.pan.x, y: e.clientY - state.pan.y };
+  }
+
+  function handleMouseMove(e) {
+    if (state.connectingFrom) {
+      const fromNode = state.nodes.find(n => n.id === state.connectingFrom.nodeId);
+      if (fromNode) {
+        const p1 = getPortCoordinates(fromNode, state.connectingFrom.port);
+        const pt = screenToWorld(e.clientX, e.clientY);
+        dom.tempLine.setAttribute('d', calculateSmoothPath(p1, pt, state.connectingFrom.port, 'top'));
+      }
+      return;
+    }
+
+    if (state.dragNodeId) {
+      const dx = (e.clientX - state.dragStart.x) / state.zoom;
+      const dy = (e.clientY - state.dragStart.y) / state.zoom;
+      const node = state.nodes.find(n => n.id === state.dragNodeId);
+      if (node) {
+        node.x = Math.round(state.nodeStartPos.x + dx);
+        node.y = Math.round(state.nodeStartPos.y + dy);
+        render();
+        positionNodeToolbar(node);
+      }
+      return;
+    }
+
+    if (state.isPanning) {
+      state.pan.x = e.clientX - state.panStart.x;
+      state.pan.y = e.clientY - state.panStart.y;
+      updateWorldTransform();
+      if (state.selectedNodeId) {
+        const sel = state.nodes.find(n => n.id === state.selectedNodeId);
+        if (sel) positionNodeToolbar(sel);
+      }
+    }
+  }
+
+  function handleMouseUp(e) {
+    if (state.connectingFrom) {
+      dom.tempLine.style.display = 'none';
+      const targetPort = e.target.closest('.node-port');
+      const targetNode = e.target.closest('.canvas-node');
+
+      if (targetPort) {
+        createEdge(state.connectingFrom.nodeId, targetPort.dataset.nodeId, state.connectingFrom.port, targetPort.dataset.port);
+      } else if (targetNode) {
+        createEdge(state.connectingFrom.nodeId, targetNode.dataset.id, state.connectingFrom.port, 'top');
+      }
+
+      state.connectingFrom = null;
+    }
+
+    if (state.dragNodeId) {
+      state.dragNodeId = null;
+      saveState();
+    }
+
+    if (state.isPanning) {
+      state.isPanning = false;
+    }
+  }
+
+  function handleWheel(e) {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+    const rect = dom.viewport.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.3), 2.5);
+    state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
+    state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
+    state.zoom = newZoom;
+
+    updateWorldTransform();
+    if (state.selectedNodeId) {
+      const sel = state.nodes.find(n => n.id === state.selectedNodeId);
+      if (sel) positionNodeToolbar(sel);
+    }
+  }
+
   function setZoom(val) {
     state.zoom = Math.min(Math.max(val, 0.3), 2.5);
-    dom.container.style.transform = `scale(${state.zoom})`;
-    dom.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+    updateWorldTransform();
   }
 
-  // ── Copy & Export ──
-  function copyCode() {
-    const code = generateCode();
+  function updateWorldTransform() {
+    if (dom.world) {
+      dom.world.style.transform = `translate(${state.pan.x}px, ${state.pan.y}px) scale(${state.zoom})`;
+    }
+    if (dom.zoomValue) {
+      dom.zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
+    }
+  }
+
+  function screenToWorld(clientX, clientY) {
+    const rect = dom.viewport.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - state.pan.x) / state.zoom,
+      y: (clientY - rect.top - state.pan.y) / state.zoom
+    };
+  }
+
+  // --- CONNECT MODE ---
+  function startConnectMode(fromNodeId) {
+    state.connectModeFromId = fromNodeId;
+    dom.connectBanner.classList.add('visible');
+    hideNodeToolbar();
+    showToast('🔗 Haz clic en el nodo destino');
+  }
+
+  function finishConnectMode(toNodeId) {
+    if (state.connectModeFromId && state.connectModeFromId !== toNodeId) {
+      createEdge(state.connectModeFromId, toNodeId);
+    }
+    cancelConnectMode();
+  }
+
+  function cancelConnectMode() {
+    state.connectModeFromId = null;
+    dom.connectBanner.classList.remove('visible');
+  }
+
+  // --- EDGE SELECTION ---
+  function selectEdge(edgeId, clientX, clientY) {
+    state.selectedEdgeId = edgeId;
+    state.selectedNodeId = null;
+    hideNodeToolbar();
+    render();
+
+    const edge = state.edges.find(e => e.id === edgeId);
+    if (edge) showEdgePopoverForEdge(edge, clientX, clientY);
+  }
+
+  // --- CODE PANEL TOGGLE ---
+  function toggleCodePanel() {
+    setCodePanel(!state.codePanelOpen);
+  }
+
+  function setCodePanel(open) {
+    state.codePanelOpen = open;
+    if (open) {
+      dom.sidebarCode.classList.remove('collapsed');
+      dom.btnToggleCode.classList.add('active');
+    } else {
+      dom.sidebarCode.classList.add('collapsed');
+      dom.btnToggleCode.classList.remove('active');
+    }
+  }
+
+  // --- KEYBOARD SHORTCUTS ---
+  function handleKeyboard(e) {
+    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      deleteSelected();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      e.preventDefault();
+      redo();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !window.getSelection().toString()) {
+      e.preventDefault();
+      copyMermaidCode();
+    }
+  }
+
+  // --- COPY & EXPORT ---
+  function copyMermaidCode() {
+    const code = generateMermaidCode();
     navigator.clipboard.writeText(code).then(() => {
-      toast('📋 ¡Código copiado al portapapeles!');
-      const orig = dom.btnCopy.innerHTML;
-      dom.btnCopy.innerHTML = '✅ ¡Copiado!';
-      setTimeout(() => dom.btnCopy.innerHTML = orig, 1600);
-    }).catch(() => toast('Selecciona el código manualmente'));
+      showToast('📋 ¡Código Mermaid copiado!');
+      if (dom.btnCopy) {
+        const originalHtml = dom.btnCopy.innerHTML;
+        dom.btnCopy.innerHTML = '<span>✅ ¡Copiado!</span>';
+        setTimeout(() => dom.btnCopy.innerHTML = originalHtml, 1600);
+      }
+    }).catch(() => showToast('Selecciona el código manualmente'));
   }
 
   function downloadMmd() {
-    const blob = new Blob([generateCode()], { type: 'text/plain;charset=utf-8' });
+    const code = generateMermaidCode();
+    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `diagrama_${Date.now().toString(36)}.mmd`;
+    a.download = `diagrama_mermaid_${Date.now().toString(36)}.mmd`;
     a.click();
     URL.revokeObjectURL(url);
-    toast('💾 Archivo .mmd descargado');
+    showToast('💾 Archivo .mmd descargado');
   }
 
-  // ── Toast ──
-  function toast(msg) {
-    if (!dom.toasts) return;
-    const el = document.createElement('div');
-    el.className = 'toast';
-    el.textContent = msg;
-    dom.toasts.appendChild(el);
-    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2000);
+  function showToast(msg) {
+    if (!dom.toastContainer) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    dom.toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity 0.25s';
+      setTimeout(() => toast.remove(), 250);
+    }, 2000);
   }
 
-  // ── Templates ──
+  // --- PRESET TEMPLATES ---
   function loadTemplate(key) {
-    const T = {
+    const templates = {
       auth: {
         direction: 'TD',
         nodes: [
-          { id: 'A', type: 'terminal', label: 'Inicio' },
-          { id: 'B', type: 'io', label: 'Ingresar Credenciales' },
-          { id: 'C', type: 'decision', label: '¿Credenciales Válidas?' },
-          { id: 'D', type: 'process', label: 'Generar Token JWT' },
-          { id: 'E', type: 'process', label: 'Mostrar Error 401' },
-          { id: 'F', type: 'terminal', label: 'Fin' }
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', x: 200, y: 50 },
+          { id: 'B', shape: 'io', color: 'cyan', label: 'Ingresar Credenciales', x: 200, y: 150 },
+          { id: 'C', shape: 'decision', color: 'amber', label: '¿Credenciales Válidas?', x: 200, y: 260 },
+          { id: 'D', shape: 'process', color: 'sky', label: 'Generar Token JWT', x: 80, y: 390 },
+          { id: 'E', shape: 'process', color: 'rose', label: 'Mostrar Error 401', x: 330, y: 390 },
+          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 510 }
         ],
         edges: [
-          { from: 'A', to: 'B', label: '', style: 'normal' },
-          { from: 'B', to: 'C', label: '', style: 'normal' },
-          { from: 'C', to: 'D', label: 'Sí', style: 'normal' },
-          { from: 'C', to: 'E', label: 'No', style: 'normal' },
-          { from: 'D', to: 'F', label: '', style: 'normal' },
-          { from: 'E', to: 'F', label: '', style: 'normal' }
+          { id: 'e1', from: 'A', to: 'B', style: 'normal' },
+          { id: 'e2', from: 'B', to: 'C', style: 'normal' },
+          { id: 'e3', from: 'C', to: 'D', label: 'Sí', style: 'thick' },
+          { id: 'e4', from: 'C', to: 'E', label: 'No', style: 'normal' },
+          { id: 'e5', from: 'D', to: 'F', style: 'normal' },
+          { id: 'e6', from: 'E', to: 'F', style: 'normal' }
         ]
       },
       payment: {
         direction: 'TD',
         nodes: [
-          { id: 'A', type: 'terminal', label: 'Checkout' },
-          { id: 'B', type: 'decision', label: '¿Tarjeta Válida?' },
-          { id: 'C', type: 'subroutine', label: 'Procesar con Stripe' },
-          { id: 'D', type: 'process', label: 'Rechazar Transacción' },
-          { id: 'E', type: 'database', label: 'Guardar Orden en DB' },
-          { id: 'F', type: 'terminal', label: 'Fin' }
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Checkout Carrito', x: 200, y: 50 },
+          { id: 'B', shape: 'decision', color: 'amber', label: '¿Tarjeta Válida?', x: 200, y: 160 },
+          { id: 'C', shape: 'subroutine', color: 'purple', label: 'Pasarela Stripe', x: 80, y: 290 },
+          { id: 'D', shape: 'process', color: 'rose', label: 'Rechazar Pago', x: 340, y: 290 },
+          { id: 'E', shape: 'database', color: 'purple', label: 'Guardar Orden en DB', x: 80, y: 410 },
+          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 530 }
         ],
         edges: [
-          { from: 'A', to: 'B', label: '', style: 'normal' },
-          { from: 'B', to: 'C', label: 'Sí', style: 'normal' },
-          { from: 'B', to: 'D', label: 'No', style: 'normal' },
-          { from: 'C', to: 'E', label: '', style: 'normal' },
-          { from: 'E', to: 'F', label: '', style: 'normal' },
-          { from: 'D', to: 'F', label: '', style: 'normal' }
+          { id: 'ep1', from: 'A', to: 'B', style: 'normal' },
+          { id: 'ep2', from: 'B', to: 'C', label: 'Sí', style: 'thick' },
+          { id: 'ep3', from: 'B', to: 'D', label: 'No', style: 'normal' },
+          { id: 'ep4', from: 'C', to: 'E', label: 'Aprobado', style: 'normal' },
+          { id: 'ep5', from: 'E', to: 'F', style: 'normal' },
+          { id: 'ep6', from: 'D', to: 'F', style: 'normal' }
         ]
       },
       etl: {
         direction: 'LR',
         nodes: [
-          { id: 'A', type: 'database', label: 'Fuente CSV / API' },
-          { id: 'B', type: 'process', label: 'Extracción' },
-          { id: 'C', type: 'decision', label: '¿Schema OK?' },
-          { id: 'D', type: 'process', label: 'Transformar' },
-          { id: 'E', type: 'database', label: 'Dead Letter Queue' },
-          { id: 'F', type: 'database', label: 'Data Warehouse' }
+          { id: 'A', shape: 'database', color: 'purple', label: 'Fuente CSV / API', x: 50, y: 150 },
+          { id: 'B', shape: 'process', color: 'sky', label: 'Extracción Datos', x: 250, y: 150 },
+          { id: 'C', shape: 'decision', color: 'amber', label: '¿Schema Válido?', x: 450, y: 150 },
+          { id: 'D', shape: 'process', color: 'emerald', label: 'Transformar', x: 680, y: 100 },
+          { id: 'E', shape: 'database', color: 'rose', label: 'Dead Letter Queue', x: 680, y: 230 },
+          { id: 'F', shape: 'database', color: 'purple', label: 'Data Warehouse', x: 920, y: 100 }
         ],
         edges: [
-          { from: 'A', to: 'B', label: '', style: 'normal' },
-          { from: 'B', to: 'C', label: '', style: 'normal' },
-          { from: 'C', to: 'D', label: 'Sí', style: 'normal' },
-          { from: 'C', to: 'E', label: 'No', style: 'dotted' },
-          { from: 'D', to: 'F', label: '', style: 'normal' }
+          { id: 'ee1', from: 'A', to: 'B', style: 'normal' },
+          { id: 'ee2', from: 'B', to: 'C', style: 'normal' },
+          { id: 'ee3', from: 'C', to: 'D', label: 'Sí', style: 'thick' },
+          { id: 'ee4', from: 'C', to: 'E', label: 'No', style: 'dotted' },
+          { id: 'ee5', from: 'D', to: 'F', style: 'normal' }
         ]
       },
-      empty: {
+      blank: {
         direction: 'TD',
         nodes: [],
         edges: []
       }
     };
 
-    const tpl = T[key];
+    const tpl = templates[key];
     if (tpl) {
       state.nodes = JSON.parse(JSON.stringify(tpl.nodes));
       state.edges = JSON.parse(JSON.stringify(tpl.edges));
       state.direction = tpl.direction;
-      dom.dirSelect.value = state.direction;
-      deselect();
-      pushHistory();
-      renderDiagram();
-      if (key !== 'empty') toast(`Plantilla: ${key.toUpperCase()}`);
+      if (dom.selectDirection) dom.selectDirection.value = tpl.direction;
+      state.selectedNodeId = null;
+      state.selectedEdgeId = null;
+      hideNodeToolbar();
+      hideEdgePopover();
+      render();
+      saveState();
+      autoLayout(false);
+      if (key !== 'blank') showToast(`Plantilla cargada: ${key.toUpperCase()}`);
     }
   }
 
-  // ── Boot ──
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  // --- BOOTSTRAP ---
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();
