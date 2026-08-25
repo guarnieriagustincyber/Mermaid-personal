@@ -3,91 +3,60 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MermaidFlow Studio - Editor Visual y Diagramas Profesionales</title>
+  <title>MermaidFlow Studio - Canvas Infinito</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-  <!-- Top Header -->
-  <header>
-    <div class="header-left">
-      <div class="brand-logo">⚡</div>
-      <span class="brand-title">MermaidFlow</span>
-      <span class="brand-badge">Pro Studio</span>
-    </div>
-
-    <div class="header-center">
-      <div class="header-group">
-        <button id="btn-undo" class="hdr-btn" title="Deshacer (Ctrl+Z)">↩</button>
-        <button id="btn-redo" class="hdr-btn" title="Rehacer (Ctrl+Y)">↪</button>
-      </div>
-
-      <div class="divider-v"></div>
-
-      <select id="select-template" class="hdr-select" title="Cargar Plantilla">
-        <option value="">📂 Plantillas...</option>
-        <option value="auth">🔐 Autenticación JWT</option>
-        <option value="payment">💳 Pasarela de Pago</option>
-        <option value="etl">📊 Pipeline ETL</option>
-        <option value="blank">⬜ Lienzo Limpio</option>
-      </select>
-
-      <button id="btn-clear" class="hdr-btn text-danger" title="Limpiar todo el lienzo">🗑️ Limpiar</button>
-    </div>
-
-    <div class="header-right">
-      <div class="export-dropdown-wrapper">
-        <button id="btn-export-menu" class="hdr-btn btn-export" title="Exportar Diagrama">
-          <span>💾 Exportar</span> ▾
-        </button>
-        <div class="export-dropdown" id="export-dropdown">
-          <button id="btn-export-svg" class="dropdown-item">📐 Descargar Vector SVG</button>
-          <button id="btn-export-png" class="dropdown-item">🖼️ Descargar Imagen PNG (HD)</button>
-          <button id="btn-copy-svg" class="dropdown-item">📋 Copiar SVG al Portapapeles</button>
-          <div class="dropdown-divider"></div>
-          <button id="btn-download-mmd" class="dropdown-item">📝 Descargar Código .mmd</button>
-        </div>
-      </div>
-
-      <button id="btn-theme-toggle" class="hdr-btn" title="Cambiar Tema Oscuro/Claro">🌓</button>
-      <button id="btn-toggle-code" class="hdr-btn active" title="Mostrar/Ocultar Panel de Código">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-        <span>Código</span>
-      </button>
-      <button id="btn-copy-mermaid" class="btn-copy-main" title="Copiar código Mermaid al portapapeles">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-        <span>Copiar Mermaid</span>
-      </button>
-    </div>
-  </header>
-
-  <!-- Main Canvas Workspace -->
+  <!-- App Workspace (Frameless Modern UI) -->
   <div class="workspace-wrapper">
 
-    <!-- FLOATING ISLAND TOOLBAR (Top Center Responsive Island) -->
-    <div class="floating-dock" id="floating-dock">
+    <!-- FLOATING TOP COMMAND DOCK (Figma / tldraw Style Floating Pill) -->
+    <header class="floating-dock-top" id="floating-dock">
       
+      <!-- Brand & Project -->
+      <div class="dock-segment">
+        <div class="brand-badge-icon" title="MermaidFlow Studio">⚡</div>
+        <select id="select-template" class="dock-select-subtle" title="Cargar Plantilla">
+          <option value="">📂 Plantillas...</option>
+          <option value="auth">🔐 Autenticación JWT</option>
+          <option value="payment">💳 Pasarela de Pago</option>
+          <option value="etl">📊 Pipeline ETL</option>
+          <option value="blank">⬜ Lienzo Limpio</option>
+        </select>
+      </div>
+
+      <div class="dock-divider"></div>
+
+      <!-- History & Clear -->
+      <div class="dock-segment">
+        <button id="btn-undo" class="dock-icon-btn" title="Deshacer (Ctrl+Z)">↩</button>
+        <button id="btn-redo" class="dock-icon-btn" title="Rehacer (Ctrl+Y)">↪</button>
+        <button id="btn-clear" class="dock-icon-btn text-danger" title="Limpiar lienzo">🗑️</button>
+      </div>
+
+      <div class="dock-divider"></div>
+
       <!-- Shape buttons with inline SVG vector icons -->
-      <div class="dock-section">
-        <span class="dock-label">Formas:</span>
+      <div class="dock-segment">
         <div class="dock-buttons">
           <button class="dock-btn" data-shape="terminal" title="Inicio / Fin ([Texto])">
-            <svg width="22" height="14" viewBox="0 0 24 14"><rect x="1" y="1" width="22" height="12" rx="6" fill="rgba(16,185,129,0.25)" stroke="#10b981" stroke-width="1.8"/></svg>
-            <span>Inicio/Fin</span>
+            <svg width="20" height="13" viewBox="0 0 24 14"><rect x="1" y="1" width="22" height="12" rx="6" fill="rgba(16,185,129,0.25)" stroke="#10b981" stroke-width="1.8"/></svg>
+            <span>Inicio</span>
           </button>
           
           <button class="dock-btn" data-shape="process" title="Proceso [Texto]">
-            <svg width="20" height="14" viewBox="0 0 24 14"><rect x="1" y="1" width="22" height="12" rx="2" fill="rgba(56,189,248,0.25)" stroke="#38bdf8" stroke-width="1.8"/></svg>
+            <svg width="18" height="13" viewBox="0 0 24 14"><rect x="1" y="1" width="22" height="12" rx="2" fill="rgba(56,189,248,0.25)" stroke="#38bdf8" stroke-width="1.8"/></svg>
             <span>Proceso</span>
           </button>
           
           <button class="dock-btn" data-shape="decision" title="Decisión / Rombo {¿Texto?}">
-            <svg width="18" height="18" viewBox="0 0 24 24"><polygon points="12 2, 22 12, 12 22, 2 12" fill="rgba(245,158,11,0.25)" stroke="#f59e0b" stroke-width="1.8"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24"><polygon points="12 2, 22 12, 12 22, 2 12" fill="rgba(245,158,11,0.25)" stroke="#f59e0b" stroke-width="1.8"/></svg>
             <span>Decisión</span>
           </button>
           
-          <button class="dock-btn" data-shape="database" title="Base de Datos / Cilindro [(Texto)]">
-            <svg width="18" height="18" viewBox="0 0 24 24">
+          <button class="dock-btn" data-shape="database" title="Base de Datos [(Texto)]">
+            <svg width="16" height="16" viewBox="0 0 24 24">
               <path d="M4 6 C4 3 20 3 20 6 L20 18 C20 21 4 21 4 18 Z" fill="rgba(168,85,247,0.25)" stroke="#a855f7" stroke-width="1.6"/>
               <ellipse cx="12" cy="6" rx="8" ry="3" fill="none" stroke="#a855f7" stroke-width="1.6"/>
             </svg>
@@ -95,26 +64,25 @@
           </button>
           
           <button class="dock-btn" data-shape="io" title="Entrada / Salida [/Texto/]">
-            <svg width="20" height="14" viewBox="0 0 24 14"><polygon points="5 1, 23 1, 19 13, 1 13" fill="rgba(6,182,212,0.25)" stroke="#06b6d4" stroke-width="1.8"/></svg>
+            <svg width="18" height="13" viewBox="0 0 24 14"><polygon points="5 1, 23 1, 19 13, 1 13" fill="rgba(6,182,212,0.25)" stroke="#06b6d4" stroke-width="1.8"/></svg>
             <span>E / S</span>
           </button>
 
           <button class="dock-btn" data-shape="subroutine" title="Subproceso [[Texto]]">
-            <svg width="20" height="14" viewBox="0 0 24 14">
+            <svg width="18" height="13" viewBox="0 0 24 14">
               <rect x="1" y="1" width="22" height="12" rx="2" fill="rgba(99,102,241,0.25)" stroke="#6366f1" stroke-width="1.8"/>
               <line x1="5" y1="1" x2="5" y2="13" stroke="#6366f1" stroke-width="1.5"/>
               <line x1="19" y1="1" x2="19" y2="13" stroke="#6366f1" stroke-width="1.5"/>
             </svg>
-            <span>Subrutina</span>
+            <span>Sub</span>
           </button>
         </div>
       </div>
 
       <div class="dock-divider"></div>
 
-      <!-- Colors palette -->
-      <div class="dock-section">
-        <span class="dock-label">Color:</span>
+      <!-- Color Palette -->
+      <div class="dock-segment">
         <div class="color-palette">
           <button class="color-swatch active" data-color="emerald" style="--c:#10b981;" title="Esmeralda"></button>
           <button class="color-swatch" data-color="sky" style="--c:#0284c7;" title="Azul"></button>
@@ -128,32 +96,57 @@
 
       <div class="dock-divider"></div>
 
-      <!-- Connector Style Picker -->
-      <div class="dock-section">
-        <select id="select-conn-style" class="dock-select" title="Estilo de Flechas">
+      <!-- Connector & Direction -->
+      <div class="dock-segment">
+        <select id="select-conn-style" class="dock-select-subtle" title="Estilo de Flechas">
           <option value="curved">〰️ Curvas</option>
-          <option value="orthogonal">📐 Ortogonales (90°)</option>
+          <option value="orthogonal">📐 90°</option>
           <option value="straight">📏 Rectas</option>
         </select>
-      </div>
 
-      <div class="dock-divider"></div>
-
-      <!-- Direction & Auto-Layout -->
-      <div class="dock-section">
-        <select id="select-direction" class="dock-select" title="Dirección del diagrama">
+        <select id="select-direction" class="dock-select-subtle" title="Dirección del diagrama">
           <option value="TD">↓ TD</option>
           <option value="LR">→ LR</option>
           <option value="BT">↑ BT</option>
           <option value="RL">← RL</option>
         </select>
 
-        <button id="btn-auto-layout" class="btn-dock-action" title="Auto-Organizar nodos jerárquicamente">
-          <span>⚡ Auto-Organizar</span>
+        <button id="btn-auto-layout" class="btn-dock-accent" title="Auto-Organizar nodos">
+          <span>⚡ Organizar</span>
         </button>
       </div>
 
-    </div>
+      <div class="dock-divider"></div>
+
+      <!-- Export & Theme & Code Toggle -->
+      <div class="dock-segment">
+        <div class="export-dropdown-wrapper">
+          <button id="btn-export-menu" class="dock-btn-outline" title="Exportar Diagrama">
+            <span>💾 Exportar ▾</span>
+          </button>
+          <div class="export-dropdown" id="export-dropdown">
+            <button id="btn-export-svg" class="dropdown-item">📐 Descargar Vector SVG</button>
+            <button id="btn-export-png" class="dropdown-item">🖼️ Descargar Imagen PNG (HD)</button>
+            <button id="btn-copy-svg" class="dropdown-item">📋 Copiar SVG al Portapapeles</button>
+            <div class="dropdown-divider"></div>
+            <button id="btn-download-mmd" class="dropdown-item">📝 Descargar Código .mmd</button>
+          </div>
+        </div>
+
+        <button id="btn-theme-toggle" class="dock-icon-btn" title="Cambiar Tema Oscuro/Claro">🌓</button>
+
+        <button id="btn-toggle-code" class="dock-btn-outline active" title="Mostrar/Ocultar Panel de Código">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          <span>Código</span>
+        </button>
+
+        <button id="btn-copy-mermaid" class="btn-copy-dock" title="Copiar código Mermaid al portapapeles">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <span>Copiar</span>
+        </button>
+      </div>
+
+    </header>
 
     <!-- CANVAS INTERACTIVO -->
     <main class="canvas-viewport" id="canvas-viewport">
@@ -176,13 +169,20 @@
         <div id="nodes-layer" class="nodes-layer"></div>
       </div>
 
-      <!-- Floating Node Inspector / Actions Bar (Appears on Selected Node) -->
+      <!-- Floating Node Inspector / Actions Bar -->
       <div class="node-floating-toolbar" id="node-floating-toolbar">
         <div id="node-branch-actions" class="toolbar-group"></div>
         <div class="toolbar-divider"></div>
         <button id="btn-node-edit" class="tool-btn" title="Editar texto (Doble clic)">✏️</button>
         <button id="btn-node-connect" class="tool-btn" title="Conectar con otro nodo">🔗</button>
         <button id="btn-node-delete" class="tool-btn text-danger" title="Eliminar nodo (Supr)">🗑️</button>
+      </div>
+
+      <!-- Multi-Selection Summary Toolbar -->
+      <div class="multi-select-toolbar" id="multi-select-toolbar">
+        <span id="multi-select-count">0 seleccionados</span>
+        <div class="toolbar-divider"></div>
+        <button id="btn-multi-delete" class="tool-btn text-danger" title="Eliminar seleccionados (Supr)">🗑️ Eliminar</button>
       </div>
 
       <!-- Floating Edge / Condition Popover -->
@@ -216,22 +216,20 @@
 
       <!-- Connect Mode Indicator Banner -->
       <div class="connect-guide-banner" id="connect-guide-banner">
-        <span>🔗 Haz clic en el nodo de destino para crear la conexión</span>
+        <span>🔗 Haz clic en el nodo destino</span>
         <button id="btn-cancel-connection" class="btn-cancel-link">✕ Cancelar</button>
       </div>
 
-      <!-- Bottom Canvas Zoom Controls -->
+      <!-- Bottom Canvas Navigation Hints & Zoom Controls -->
+      <div class="canvas-navigation-hint">
+        <span>💡 <b>Shift + Rueda:</b> Desplazamiento Horizontal | <b>Ctrl + Clic:</b> Selección Múltiple</span>
+      </div>
+
       <div class="floating-zoom-controls">
         <button id="btn-zoom-out" class="zoom-btn" title="Alejar (−)">−</button>
         <span id="zoom-value" class="zoom-text">100%</span>
         <button id="btn-zoom-in" class="zoom-btn" title="Acercar (+)">+</button>
         <button id="btn-zoom-fit" class="zoom-btn" title="Centrar y Ajustar (⊞)">⊞</button>
-      </div>
-
-      <!-- Floating Live Minimap -->
-      <div class="canvas-minimap" id="canvas-minimap">
-        <svg id="minimap-svg" class="minimap-svg"></svg>
-        <div id="minimap-viewfinder" class="minimap-viewfinder"></div>
       </div>
     </main>
 
@@ -239,7 +237,7 @@
     <aside class="sidebar-code" id="sidebar-code">
       <div class="code-panel-header">
         <div class="code-panel-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
           <span>Editor de Código Mermaid</span>
         </div>
         <button id="btn-close-code-panel" class="btn-icon-close" title="Ocultar panel">✕</button>

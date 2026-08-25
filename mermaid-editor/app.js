@@ -1,5 +1,5 @@
 /**
- * MermaidFlow Studio - Complete Dynamic Vector Flowchart & Bidirectional Mermaid Editor
+ * MermaidFlow Studio - Ultra-Modern Frameless Canvas & Multi-Selection Engine
  * High-Performance Vanilla JS + SVG Architecture
  */
 
@@ -33,7 +33,6 @@
 
     switch (shape) {
       case 'decision': {
-        // Rhombus geometry: useful inner area is diamond inscribed in rectangle
         const w = Math.max(150, Math.round(metrics.width * 1.5 + 36));
         const h = Math.max(72, Math.round(metrics.lines * 22 + 42));
         return { width: w, height: h };
@@ -139,19 +138,19 @@
   const state = {
     nodes: [],
     edges: [],
-    selectedNodeId: null,
+    selectedNodeIds: new Set(), // Multi-selection support (Ctrl + Click)
     selectedEdgeId: null,
     editingNodeId: null,
     activeColor: 'emerald',
     direction: 'TD',
-    connStyle: 'curved', // 'curved' | 'orthogonal' | 'straight'
+    connStyle: 'curved',
     pan: { x: 100, y: 90 },
     zoom: 1,
     isPanning: false,
     panStart: { x: 0, y: 0 },
-    dragNodeId: null,
-    dragStart: { x: 0, y: 0 },
-    nodeStartPos: { x: 0, y: 0 },
+    isDraggingNodes: false,
+    dragStartMouse: { x: 0, y: 0 },
+    dragInitialNodePos: new Map(), // nodeId -> { x, y }
     connectingFrom: null,
     connectModeFromId: null,
     history: [],
@@ -172,6 +171,9 @@
     nodesLayer: $('nodes-layer'),
     nodeToolbar: $('node-floating-toolbar'),
     nodeBranchActions: $('node-branch-actions'),
+    multiSelectToolbar: $('multi-select-toolbar'),
+    multiSelectCount: $('multi-select-count'),
+    btnMultiDelete: $('btn-multi-delete'),
     btnNodeEdit: $('btn-node-edit'),
     btnNodeConnect: $('btn-node-connect'),
     btnNodeDelete: $('btn-node-delete'),
@@ -205,9 +207,6 @@
     zoomOut: $('btn-zoom-out'),
     zoomFit: $('btn-zoom-fit'),
     zoomValue: $('zoom-value'),
-    minimap: $('canvas-minimap'),
-    minimapSvg: $('minimap-svg'),
-    minimapViewfinder: $('minimap-viewfinder'),
     statNodes: $('stat-nodes'),
     statEdges: $('stat-edges'),
     syncStatus: $('sync-status'),
@@ -260,7 +259,6 @@
       updateMermaidCode();
     }
     updateStats();
-    updateMinimap();
   }
 
   function undo() {
@@ -288,14 +286,13 @@
       state.connStyle = data.connStyle || 'curved';
       if (dom.selectDirection) dom.selectDirection.value = state.direction;
       if (dom.selectConnStyle) dom.selectConnStyle.value = state.connStyle;
-      state.selectedNodeId = null;
+      state.selectedNodeIds.clear();
       state.selectedEdgeId = null;
-      hideNodeToolbar();
+      hideToolbars();
       hideEdgePopover();
       render();
       updateMermaidCode();
       updateStats();
-      updateMinimap();
     } catch (e) {
       console.error(e);
     }
@@ -368,13 +365,14 @@
     };
 
     state.nodes.push(node);
-    state.selectedNodeId = node.id;
+    state.selectedNodeIds.clear();
+    state.selectedNodeIds.add(node.id);
     state.selectedEdgeId = null;
     hideEdgePopover();
 
     render();
     saveState();
-    positionNodeToolbar(node);
+    updateToolbars();
     return node;
   }
 
@@ -388,7 +386,7 @@
     node.height = dims.height;
     render();
     saveState();
-    positionNodeToolbar(node);
+    updateToolbars();
   }
 
   function createEdge(fromId, toId, fromPort = 'bottom', toPort = 'top', label = '', style = 'normal') {
@@ -408,8 +406,8 @@
 
     state.edges.push(edge);
     state.selectedEdgeId = edge.id;
-    state.selectedNodeId = null;
-    hideNodeToolbar();
+    state.selectedNodeIds.clear();
+    hideToolbars();
 
     render();
     saveState();
@@ -450,12 +448,12 @@
 
   function deleteSelected() {
     let modified = false;
-    if (state.selectedNodeId) {
-      const id = state.selectedNodeId;
-      state.nodes = state.nodes.filter(n => n.id !== id);
-      state.edges = state.edges.filter(e => e.from !== id && e.to !== id);
-      state.selectedNodeId = null;
-      hideNodeToolbar();
+    if (state.selectedNodeIds.size > 0) {
+      const idsToDelete = new Set(state.selectedNodeIds);
+      state.nodes = state.nodes.filter(n => !idsToDelete.has(n.id));
+      state.edges = state.edges.filter(e => !idsToDelete.has(e.from) && !idsToDelete.has(e.to));
+      state.selectedNodeIds.clear();
+      hideToolbars();
       modified = true;
     } else if (state.selectedEdgeId) {
       const id = state.selectedEdgeId;
@@ -468,7 +466,7 @@
     if (modified) {
       render();
       saveState();
-      showToast('🗑️ Eliminado');
+      showToast('🗑️ Elementos eliminados');
     }
   }
 
@@ -720,7 +718,7 @@
       });
     });
 
-    // Collision Resolution Pass (AABB Separation)
+    // Collision Resolution Pass
     const minGap = 26;
     const nodeList = state.nodes.map(n => ({
       id: n.id,
@@ -786,10 +784,7 @@
       });
 
       render();
-      if (state.selectedNodeId) {
-        const sel = state.nodes.find(n => n.id === state.selectedNodeId);
-        if (sel) positionNodeToolbar(sel);
-      }
+      updateToolbars();
 
       if (progress < 1) {
         requestAnimationFrame(step);
@@ -875,7 +870,7 @@
 
       const w = node.width;
       const h = node.height;
-      const isSelected = state.selectedNodeId === node.id;
+      const isSelected = state.selectedNodeIds.has(node.id);
       const isEditing = state.editingNodeId === node.id;
 
       const nodeEl = document.createElement('div');
@@ -908,7 +903,7 @@
           if (e.key === 'Escape') {
             state.editingNodeId = null;
             render();
-            positionNodeToolbar(node);
+            updateToolbars();
           }
         });
         nodeEl.appendChild(input);
@@ -1026,7 +1021,6 @@
       }
     }
 
-    // Default: Smooth cubic Bézier
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1055,6 +1049,25 @@
   }
 
   // --- FLOATING TOOLBARS ---
+  function updateToolbars() {
+    if (state.selectedNodeIds.size === 1) {
+      const singleId = Array.from(state.selectedNodeIds)[0];
+      const node = state.nodes.find(n => n.id === singleId);
+      if (node) {
+        positionNodeToolbar(node);
+        if (dom.multiSelectToolbar) dom.multiSelectToolbar.classList.remove('visible');
+      }
+    } else if (state.selectedNodeIds.size > 1) {
+      hideSingleNodeToolbar();
+      if (dom.multiSelectToolbar) {
+        dom.multiSelectCount.textContent = `${state.selectedNodeIds.size} cajas seleccionadas`;
+        dom.multiSelectToolbar.classList.add('visible');
+      }
+    } else {
+      hideToolbars();
+    }
+  }
+
   function positionNodeToolbar(node) {
     if (!dom.nodeToolbar || !node) return;
 
@@ -1081,8 +1094,13 @@
     dom.nodeToolbar.classList.add('visible');
   }
 
-  function hideNodeToolbar() {
+  function hideSingleNodeToolbar() {
     if (dom.nodeToolbar) dom.nodeToolbar.classList.remove('visible');
+  }
+
+  function hideToolbars() {
+    if (dom.nodeToolbar) dom.nodeToolbar.classList.remove('visible');
+    if (dom.multiSelectToolbar) dom.multiSelectToolbar.classList.remove('visible');
   }
 
   function showEdgePopoverForEdge(edge, clientX, clientY) {
@@ -1123,52 +1141,6 @@
 
   function hideEdgePopover() {
     if (dom.edgePopover) dom.edgePopover.classList.remove('visible');
-  }
-
-  // --- INTERACTIVE MINIMAP ---
-  function updateMinimap() {
-    if (!dom.minimapSvg || !dom.minimap) return;
-    if (state.nodes.length === 0) {
-      dom.minimapSvg.innerHTML = '';
-      return;
-    }
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    state.nodes.forEach(n => {
-      minX = Math.min(minX, n.x);
-      minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + (n.width || 140));
-      maxY = Math.max(maxY, n.y + (n.height || 52));
-    });
-
-    const padding = 60;
-    minX -= padding; minY -= padding;
-    maxX += padding; maxY += padding;
-
-    const graphW = Math.max(maxX - minX, 200);
-    const graphH = Math.max(maxY - minY, 150);
-
-    dom.minimapSvg.setAttribute('viewBox', `${minX} ${minY} ${graphW} ${graphH}`);
-
-    let svgHtml = '';
-    // Draw edges
-    state.edges.forEach(e => {
-      const fn = state.nodes.find(n => n.id === e.from);
-      const tn = state.nodes.find(n => n.id === e.to);
-      if (fn && tn) {
-        const p1 = getPortCoordinates(fn, e.fromPort || 'bottom');
-        const p2 = getPortCoordinates(tn, e.toPort || 'top');
-        svgHtml += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#475569" stroke-width="2"/>`;
-      }
-    });
-
-    // Draw nodes
-    state.nodes.forEach(n => {
-      const color = n.color === 'emerald' ? '#10b981' : (n.color === 'amber' ? '#f59e0b' : (n.color === 'purple' ? '#a855f7' : '#0284c7'));
-      svgHtml += `<rect x="${n.x}" y="${n.y}" width="${n.width || 140}" height="${n.height || 52}" rx="4" fill="${color}" opacity="0.8"/>`;
-    });
-
-    dom.minimapSvg.innerHTML = svgHtml;
   }
 
   // --- EXPORT TOOLS (SVG / PNG / CLIPBOARD) ---
@@ -1281,7 +1253,7 @@
     const url = URL.createObjectURL(svgBlob);
 
     img.onload = () => {
-      const scale = 2; // 2x Retina Resolution
+      const scale = 2;
       const canvas = document.createElement('canvas');
       canvas.width = img.width * scale;
       canvas.height = img.height * scale;
@@ -1327,8 +1299,8 @@
     });
 
     const rect = dom.viewport.getBoundingClientRect();
-    const graphW = maxX - minX + 120;
-    const graphH = maxY - minY + 120;
+    const graphW = maxX - minX + 140;
+    const graphH = maxY - minY + 140;
 
     const scaleX = rect.width / graphW;
     const scaleY = rect.height / graphH;
@@ -1339,6 +1311,7 @@
     state.pan.y = (rect.height - (maxY + minY) * newZoom) / 2;
 
     updateWorldTransform();
+    updateToolbars();
     showToast('⊞ Diagrama centrado');
   }
 
@@ -1361,16 +1334,16 @@
       }
     });
 
-    // Top Header Buttons
+    // Top Floating Dock Buttons
     dom.btnUndo.addEventListener('click', undo);
     dom.btnRedo.addEventListener('click', redo);
     dom.btnClear.addEventListener('click', () => {
       if (confirm('¿Limpiar todo el lienzo?')) {
         state.nodes = [];
         state.edges = [];
-        state.selectedNodeId = null;
+        state.selectedNodeIds.clear();
         state.selectedEdgeId = null;
-        hideNodeToolbar();
+        hideToolbars();
         hideEdgePopover();
         render();
         saveState();
@@ -1458,19 +1431,23 @@
       }
     });
 
-    // Node Toolbar Events
+    // Single Node Toolbar Events
     dom.btnNodeEdit.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (state.selectedNodeId) {
-        state.editingNodeId = state.selectedNodeId;
-        hideNodeToolbar();
+      if (state.selectedNodeIds.size === 1) {
+        const singleId = Array.from(state.selectedNodeIds)[0];
+        state.editingNodeId = singleId;
+        hideToolbars();
         render();
       }
     });
 
     dom.btnNodeConnect.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (state.selectedNodeId) startConnectMode(state.selectedNodeId);
+      if (state.selectedNodeIds.size === 1) {
+        const singleId = Array.from(state.selectedNodeIds)[0];
+        startConnectMode(singleId);
+      }
     });
 
     dom.btnNodeDelete.addEventListener('click', (e) => {
@@ -1478,15 +1455,23 @@
       deleteSelected();
     });
 
+    if (dom.btnMultiDelete) {
+      dom.btnMultiDelete.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSelected();
+      });
+    }
+
     if (dom.nodeBranchActions) {
       dom.nodeBranchActions.addEventListener('click', (e) => {
         const btn = e.target.closest('.tool-btn');
-        if (!btn || !state.selectedNodeId) return;
+        if (!btn || state.selectedNodeIds.size !== 1) return;
+        const singleId = Array.from(state.selectedNodeIds)[0];
         e.stopPropagation();
         const act = btn.dataset.act;
-        if (act === 'yes') quickAddBranch(state.selectedNodeId, 'Sí');
-        else if (act === 'no') quickAddBranch(state.selectedNodeId, 'No');
-        else if (act === 'next') quickAddBranch(state.selectedNodeId, '');
+        if (act === 'yes') quickAddBranch(singleId, 'Sí');
+        else if (act === 'no') quickAddBranch(singleId, 'No');
+        else if (act === 'next') quickAddBranch(singleId, '');
       });
     }
 
@@ -1551,20 +1536,21 @@
         swatch.classList.add('active');
         state.activeColor = swatch.dataset.color;
 
-        if (state.selectedNodeId) {
-          const node = state.nodes.find(n => n.id === state.selectedNodeId);
-          if (node) {
-            node.color = state.activeColor;
-            render();
-            saveState();
-            positionNodeToolbar(node);
-          }
+        if (state.selectedNodeIds.size > 0) {
+          state.nodes.forEach(node => {
+            if (state.selectedNodeIds.has(node.id)) {
+              node.color = state.activeColor;
+            }
+          });
+          render();
+          saveState();
+          updateToolbars();
         }
       });
     });
   }
 
-  // --- MOUSE & TOUCH HANDLERS ---
+  // --- MOUSE & TOUCH HANDLERS (With Shift+Wheel & Ctrl+Click Multi-Selection) ---
   function handleCanvasMouseDown(e) {
     if (e.target.classList.contains('node-port')) {
       e.stopPropagation();
@@ -1590,22 +1576,43 @@
         return;
       }
 
-      if (state.selectedNodeId === nodeId && e.detail === 2) {
+      // Inline text edit on double click
+      if (state.selectedNodeIds.has(nodeId) && e.detail === 2) {
         state.editingNodeId = nodeId;
-        hideNodeToolbar();
+        hideToolbars();
         render();
         return;
       }
 
-      state.selectedNodeId = nodeId;
+      // Multi-selection with Ctrl / Cmd
+      if (e.ctrlKey || e.metaKey) {
+        if (state.selectedNodeIds.has(nodeId)) {
+          state.selectedNodeIds.delete(nodeId);
+        } else {
+          state.selectedNodeIds.add(nodeId);
+        }
+      } else {
+        if (!state.selectedNodeIds.has(nodeId)) {
+          state.selectedNodeIds.clear();
+          state.selectedNodeIds.add(nodeId);
+        }
+      }
+
       state.selectedEdgeId = null;
       hideEdgePopover();
-      state.dragNodeId = nodeId;
-      state.dragStart = { x: e.clientX, y: e.clientY };
-      const n = state.nodes.find(nod => nod.id === nodeId);
-      state.nodeStartPos = { x: n.x, y: n.y };
+
+      // Prepare multi-drag
+      state.isDraggingNodes = true;
+      state.dragStartMouse = { x: e.clientX, y: e.clientY };
+      state.dragInitialNodePos.clear();
+      state.nodes.forEach(n => {
+        if (state.selectedNodeIds.has(n.id)) {
+          state.dragInitialNodePos.set(n.id, { x: n.x, y: n.y });
+        }
+      });
+
       render();
-      positionNodeToolbar(n);
+      updateToolbars();
       return;
     }
 
@@ -1617,14 +1624,15 @@
       return;
     }
 
-    if (e.target.closest('#node-floating-toolbar') || e.target.closest('#edge-floating-popover') || e.target.closest('#floating-dock') || e.target.closest('#sidebar-code') || e.target.closest('#export-dropdown')) {
+    if (e.target.closest('#node-floating-toolbar') || e.target.closest('#multi-select-toolbar') || e.target.closest('#edge-floating-popover') || e.target.closest('#floating-dock') || e.target.closest('#sidebar-code') || e.target.closest('#export-dropdown')) {
       return;
     }
 
-    state.selectedNodeId = null;
+    // Click on canvas background -> Deselect all & Pan
+    state.selectedNodeIds.clear();
     state.selectedEdgeId = null;
     state.editingNodeId = null;
-    hideNodeToolbar();
+    hideToolbars();
     hideEdgePopover();
     cancelConnectMode();
     render();
@@ -1644,16 +1652,20 @@
       return;
     }
 
-    if (state.dragNodeId) {
-      const dx = (e.clientX - state.dragStart.x) / state.zoom;
-      const dy = (e.clientY - state.dragStart.y) / state.zoom;
-      const node = state.nodes.find(n => n.id === state.dragNodeId);
-      if (node) {
-        node.x = Math.round(state.nodeStartPos.x + dx);
-        node.y = Math.round(state.nodeStartPos.y + dy);
-        render();
-        positionNodeToolbar(node);
-      }
+    if (state.isDraggingNodes) {
+      const dx = (e.clientX - state.dragStartMouse.x) / state.zoom;
+      const dy = (e.clientY - state.dragStartMouse.y) / state.zoom;
+
+      state.nodes.forEach(node => {
+        if (state.dragInitialNodePos.has(node.id)) {
+          const initial = state.dragInitialNodePos.get(node.id);
+          node.x = Math.round(initial.x + dx);
+          node.y = Math.round(initial.y + dy);
+        }
+      });
+
+      render();
+      updateToolbars();
       return;
     }
 
@@ -1661,10 +1673,7 @@
       state.pan.x = e.clientX - state.panStart.x;
       state.pan.y = e.clientY - state.panStart.y;
       updateWorldTransform();
-      if (state.selectedNodeId) {
-        const sel = state.nodes.find(n => n.id === state.selectedNodeId);
-        if (sel) positionNodeToolbar(sel);
-      }
+      updateToolbars();
     }
   }
 
@@ -1683,8 +1692,8 @@
       state.connectingFrom = null;
     }
 
-    if (state.dragNodeId) {
-      state.dragNodeId = null;
+    if (state.isDraggingNodes) {
+      state.isDraggingNodes = false;
       saveState();
     }
 
@@ -1693,28 +1702,47 @@
     }
   }
 
+  // --- SHIFT + WHEEL HORIZONTAL PANNING & ZOOM ---
   function handleWheel(e) {
     e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    const rect = dom.viewport.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
 
-    const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.3), 2.5);
-    state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
-    state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
-    state.zoom = newZoom;
+    // 1. Ctrl / Cmd + Wheel -> Zoom in / out
+    if (e.ctrlKey || e.metaKey) {
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+      const rect = dom.viewport.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    updateWorldTransform();
-    if (state.selectedNodeId) {
-      const sel = state.nodes.find(n => n.id === state.selectedNodeId);
-      if (sel) positionNodeToolbar(sel);
+      const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.3), 2.5);
+      state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
+      state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
+      state.zoom = newZoom;
+
+      updateWorldTransform();
+      updateToolbars();
+      return;
     }
+
+    // 2. Shift + Wheel -> Horizontal Pan
+    if (e.shiftKey) {
+      const delta = (e.deltaY !== 0 ? e.deltaY : e.deltaX) * 1.1;
+      state.pan.x -= delta;
+      updateWorldTransform();
+      updateToolbars();
+      return;
+    }
+
+    // 3. Normal Wheel -> Vertical Pan (or 2D trackpad pan)
+    state.pan.x -= (e.deltaX || 0) * 1.1;
+    state.pan.y -= (e.deltaY || 0) * 1.1;
+    updateWorldTransform();
+    updateToolbars();
   }
 
   function setZoom(val) {
     state.zoom = Math.min(Math.max(val, 0.3), 2.5);
     updateWorldTransform();
+    updateToolbars();
   }
 
   function updateWorldTransform() {
@@ -1724,7 +1752,6 @@
     if (dom.zoomValue) {
       dom.zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
     }
-    updateMinimap();
   }
 
   function screenToWorld(clientX, clientY) {
@@ -1739,7 +1766,7 @@
   function startConnectMode(fromNodeId) {
     state.connectModeFromId = fromNodeId;
     dom.connectBanner.classList.add('visible');
-    hideNodeToolbar();
+    hideToolbars();
     showToast('🔗 Haz clic en el nodo destino');
   }
 
@@ -1758,8 +1785,8 @@
   // --- EDGE SELECTION ---
   function selectEdge(edgeId, clientX, clientY) {
     state.selectedEdgeId = edgeId;
-    state.selectedNodeId = null;
-    hideNodeToolbar();
+    state.selectedNodeIds.clear();
+    hideToolbars();
     render();
 
     const edge = state.edges.find(e => e.id === edgeId);
@@ -1798,6 +1825,12 @@
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !window.getSelection().toString()) {
       e.preventDefault();
       copyMermaidCode();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+      e.preventDefault();
+      state.nodes.forEach(n => state.selectedNodeIds.add(n.id));
+      render();
+      updateToolbars();
+      showToast(`Seleccionados ${state.nodes.length} nodos`);
     }
   }
 
@@ -1905,9 +1938,9 @@
       state.connStyle = tpl.connStyle || 'curved';
       if (dom.selectDirection) dom.selectDirection.value = tpl.direction;
       if (dom.selectConnStyle) dom.selectConnStyle.value = state.connStyle;
-      state.selectedNodeId = null;
+      state.selectedNodeIds.clear();
       state.selectedEdgeId = null;
-      hideNodeToolbar();
+      hideToolbars();
       hideEdgePopover();
       render();
       saveState();
