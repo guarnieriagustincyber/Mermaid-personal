@@ -3,213 +3,158 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MermaidFlow Studio - Editor Visual de Diagramas de Flujo</title>
+  <title>MermaidFlow Studio</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 </head>
 <body>
 
-  <!-- Top Header Navigation -->
   <header>
     <div class="brand">
       <div class="brand-icon">⚡</div>
-      <div>
-        <h1>MermaidFlow Studio</h1>
-      </div>
-      <span class="badge">Visual to Mermaid</span>
+      <h1>MermaidFlow Studio</h1>
+      <span class="badge">Visual Editor</span>
     </div>
 
-    <!-- Center Quick Actions -->
     <div class="header-center">
-      <button id="btn-auto-layout" class="btn-primary" title="Ordenar automáticamente los nodos y ramas">
-        <span>⚡ Auto-Organizar</span>
-      </button>
-
       <select id="select-direction" title="Orientación del diagrama">
-        <option value="TD">Arriba ➔ Abajo (TD)</option>
-        <option value="LR">Izquierda ➔ Derecha (LR)</option>
-        <option value="BT">Abajo ➔ Arriba (BT)</option>
-        <option value="RL">Derecha ➔ Izquierda (RL)</option>
+        <option value="TD">↓ Arriba → Abajo (TD)</option>
+        <option value="LR">→ Izquierda → Derecha (LR)</option>
+        <option value="BT">↑ Abajo → Arriba (BT)</option>
+        <option value="RL">← Derecha → Izquierda (RL)</option>
       </select>
 
       <select id="select-template" title="Cargar plantilla de ejemplo">
         <option value="">📂 Plantillas...</option>
-        <option value="auth">🔐 Autenticación & Token JWT</option>
-        <option value="payment">💳 Pasarela de Pago & Checkout</option>
-        <option value="etl">📊 Pipeline de Datos (ETL)</option>
+        <option value="auth">🔐 Autenticación JWT</option>
+        <option value="payment">💳 Pasarela de Pago</option>
+        <option value="etl">📊 Pipeline ETL</option>
+        <option value="empty">⬜ Lienzo Vacío</option>
       </select>
     </div>
 
-    <!-- Right Actions -->
     <div class="header-right">
-      <button id="btn-clear" class="btn-ghost" title="Limpiar lienzo">🗑️ Limpiar</button>
-      <button id="btn-theme-toggle" class="btn-ghost" title="Cambiar Tema">🌓 Modo</button>
-      <button id="btn-copy" class="btn-success" title="Copiar código Mermaid al portapapeles">
-        <span>📋 Copiar Mermaid</span>
+      <button id="btn-clear" class="btn-ghost" title="Limpiar todo">🗑️ Limpiar</button>
+      <button id="btn-theme" class="btn-ghost" title="Cambiar Tema">🌓</button>
+      <button id="btn-copy" class="btn-success" title="Copiar código Mermaid">
+        📋 Copiar Código
       </button>
     </div>
   </header>
 
-  <!-- Main Work Area -->
   <div class="app-container">
 
-    <!-- Left Sidebar: Node Shapes Palette -->
+    <!-- Left: Node Palette -->
     <aside class="sidebar-palette">
-      <div class="sidebar-title">Formas Mermaid</div>
-      
+      <div class="sidebar-title">Agregar Nodo</div>
       <div class="palette-items">
-        <div class="palette-card" data-type="terminal" title="Clic para agregar al lienzo">
-          <div class="palette-shape-icon">
-            <div class="shape-preview-terminal"></div>
-          </div>
-          <div class="palette-info">
-            <span class="palette-name">Inicio / Fin</span>
-            <span class="palette-syntax">([Texto])</span>
-          </div>
-        </div>
-
-        <div class="palette-card" data-type="process" title="Clic para agregar al lienzo">
-          <div class="palette-shape-icon">
-            <div class="shape-preview-process"></div>
-          </div>
-          <div class="palette-info">
-            <span class="palette-name">Proceso</span>
-            <span class="palette-syntax">[Texto]</span>
-          </div>
-        </div>
-
-        <div class="palette-card" data-type="decision" title="Clic para agregar al lienzo">
-          <div class="palette-shape-icon">
-            <div class="shape-preview-decision"></div>
-          </div>
-          <div class="palette-info">
-            <span class="palette-name">Decisión</span>
-            <span class="palette-syntax">{¿Condición?}</span>
-          </div>
-        </div>
-
-        <div class="palette-card" data-type="database" title="Clic para agregar al lienzo">
-          <div class="palette-shape-icon">
-            <div class="shape-preview-database"></div>
-          </div>
-          <div class="palette-info">
-            <span class="palette-name">Base de Datos</span>
-            <span class="palette-syntax">[(Datos)]</span>
-          </div>
-        </div>
-
-        <div class="palette-card" data-type="io" title="Clic para agregar al lienzo">
-          <div class="palette-shape-icon">
-            <div class="shape-preview-io"></div>
-          </div>
-          <div class="palette-info">
-            <span class="palette-name">Entrada / Salida</span>
-            <span class="palette-syntax">[/Lectura/]</span>
-          </div>
-        </div>
-
-        <div class="palette-card" data-type="subroutine" title="Clic para agregar al lienzo">
-          <div class="palette-shape-icon">
-            <div class="shape-preview-subroutine"></div>
-          </div>
-          <div class="palette-info">
-            <span class="palette-name">Subproceso</span>
-            <span class="palette-syntax">[[Subrutina]]</span>
-          </div>
-        </div>
+        <button class="palette-card" data-type="terminal">
+          <div class="shape-icon"><div class="sp sp-terminal"></div></div>
+          <div class="palette-info"><span class="pname">Inicio / Fin</span><span class="psyntax">([...])</span></div>
+        </button>
+        <button class="palette-card" data-type="process">
+          <div class="shape-icon"><div class="sp sp-process"></div></div>
+          <div class="palette-info"><span class="pname">Proceso</span><span class="psyntax">[...]</span></div>
+        </button>
+        <button class="palette-card" data-type="decision">
+          <div class="shape-icon"><div class="sp sp-decision"></div></div>
+          <div class="palette-info"><span class="pname">Decisión</span><span class="psyntax">{...}</span></div>
+        </button>
+        <button class="palette-card" data-type="database">
+          <div class="shape-icon"><div class="sp sp-database"></div></div>
+          <div class="palette-info"><span class="pname">Base de Datos</span><span class="psyntax">[(...)]</span></div>
+        </button>
+        <button class="palette-card" data-type="io">
+          <div class="shape-icon"><div class="sp sp-io"></div></div>
+          <div class="palette-info"><span class="pname">Entrada / Salida</span><span class="psyntax">[/.../]</span></div>
+        </button>
+        <button class="palette-card" data-type="subroutine">
+          <div class="shape-icon"><div class="sp sp-sub"></div></div>
+          <div class="palette-info"><span class="pname">Subproceso</span><span class="psyntax">[[...]]</span></div>
+        </button>
       </div>
 
-      <div class="sidebar-footer">
-        <div>💡 <b>Creación rápida:</b></div>
-        <div>• <b>Selecciona un rombo:</b> Clic en <b>+ Sí</b> o <b>+ No</b> para ramificar.</div>
-        <div>• <b>Doble clic en nodo:</b> Editar texto.</div>
-        <div>• <b>Clic en flecha:</b> Cambiar condición (Sí, No, OK).</div>
+      <div class="sidebar-help">
+        <b>Cómo usar:</b>
+        <ul>
+          <li>Clic en una forma → se agrega al diagrama.</li>
+          <li>Clic en un nodo del diagrama → editar, conectar o borrar.</li>
+          <li>Clic en una flecha → poner condición (Sí / No).</li>
+          <li><b>Decisión:</b> usa <b>+ Sí</b> / <b>+ No</b> para ramificar.</li>
+        </ul>
       </div>
     </aside>
 
-    <!-- Canvas Area -->
-    <main class="canvas-wrapper" id="canvas-wrapper">
-      <div id="graph-canvas">
-        <!-- SVG Connections Layer -->
-        <svg id="svg-layer">
-          <defs>
-            <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
-            </marker>
-            <marker id="arrowhead-selected" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-              <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
-            </marker>
-          </defs>
-          <g id="edges-group"></g>
-          <path id="temp-edge" class="temp-edge" style="display: none;" />
-        </svg>
-
-        <!-- HTML Interactive Nodes Layer -->
-        <div id="nodes-layer"></div>
+    <!-- Center: Mermaid Rendered Diagram (THE WORKSPACE) -->
+    <main class="diagram-workspace" id="diagram-workspace">
+      <div class="diagram-scroll" id="diagram-scroll">
+        <div class="diagram-container" id="diagram-container">
+          <!-- Mermaid SVG is rendered here -->
+        </div>
       </div>
 
-      <!-- Edge Floating Inspector Popover -->
+      <!-- Floating Node Action Bar -->
+      <div class="node-action-bar" id="node-action-bar"></div>
+
+      <!-- Floating Edge Popover -->
       <div class="edge-popover" id="edge-popover">
-        <div class="edge-popover-title">
-          <span>Condición de la Flecha</span>
-          <button id="btn-delete-edge" class="action-btn btn-del" style="padding: 2px 6px;" title="Borrar flecha">🗑️</button>
+        <div class="pop-title">Condición de la Flecha</div>
+        <div class="condition-pills">
+          <button class="cpill cpill-yes" data-val="Sí">✔ Sí</button>
+          <button class="cpill cpill-no" data-val="No">✖ No</button>
+          <button class="cpill cpill-ok" data-val="OK">● OK</button>
+          <button class="cpill cpill-err" data-val="Error">⚠ Error</button>
+          <button class="cpill cpill-clear" data-val="">∅ Ninguna</button>
         </div>
-
-        <div class="quick-conditions">
-          <button class="condition-pill pill-yes" data-val="Sí">🟢 Sí</button>
-          <button class="condition-pill pill-no" data-val="No">🔴 No</button>
-          <button class="condition-pill pill-ok" data-val="OK">🔵 OK</button>
-          <button class="condition-pill pill-none" data-val="">⚪ Ninguna</button>
-        </div>
-
-        <input type="text" id="edge-label-input" placeholder="O escribe texto libre..." />
-
+        <input type="text" id="edge-label-input" placeholder="Texto libre..." />
         <select id="edge-style-select">
-          <option value="normal">Flecha Normal (-->)</option>
-          <option value="thick">Flecha Gruesa (==>)</option>
-          <option value="dotted">Línea Punteada (-.->)</option>
-          <option value="open">Línea Simple (---)</option>
+          <option value="normal">→ Flecha Normal</option>
+          <option value="thick">⇒ Flecha Gruesa</option>
+          <option value="dotted">⇢ Punteada</option>
         </select>
+        <button class="pop-delete" id="btn-delete-edge">🗑️ Borrar Flecha</button>
       </div>
 
-      <!-- Bottom Floating Canvas Controls -->
-      <div class="canvas-controls">
-        <button id="btn-zoom-out" class="btn-ghost" title="Alejar (−)">−</button>
-        <span class="zoom-indicator" id="zoom-level">100%</span>
-        <button id="btn-zoom-in" class="btn-ghost" title="Acercar (+)">+</button>
-        <button id="btn-zoom-reset" class="btn-ghost" title="Restablecer Zoom (100%)">⟲</button>
+      <!-- Inline Text Editor Overlay -->
+      <input type="text" class="inline-editor" id="inline-editor" />
+
+      <!-- Connect Mode Banner -->
+      <div class="connect-banner" id="connect-banner">
+        🔗 Modo Conectar: haz clic en el nodo destino &nbsp;
+        <button id="btn-cancel-connect" class="btn-ghost" style="font-size:12px;padding:3px 8px;">✕ Cancelar</button>
+      </div>
+
+      <!-- Zoom Controls -->
+      <div class="zoom-controls">
+        <button id="btn-zoom-out" class="btn-ghost">−</button>
+        <span id="zoom-level" class="zoom-label">100%</span>
+        <button id="btn-zoom-in" class="btn-ghost">+</button>
+        <button id="btn-zoom-fit" class="btn-ghost" title="Ajustar">⊞</button>
       </div>
     </main>
 
-    <!-- Right Sidebar: Live Mermaid Code -->
+    <!-- Right: Live Mermaid Code -->
     <aside class="sidebar-code">
       <div class="code-header">
-        <div class="code-header-title">
-          <span>Código Mermaid en Vivo</span>
-        </div>
+        <span class="code-title">Código Mermaid</span>
       </div>
-
-      <div class="code-content-wrapper">
-        <textarea id="mermaid-code" class="code-textarea" readonly spellcheck="false"></textarea>
+      <div class="code-body">
+        <textarea id="mermaid-code" readonly spellcheck="false"></textarea>
       </div>
-
       <div class="code-footer">
-        <div class="quick-stats">
-          <span id="node-count">0 nodos</span>
-          <span id="edge-count">0 conexiones</span>
-          <span>Sintaxis Mermaid v10</span>
+        <div class="stats">
+          <span id="stat-nodes">0 nodos</span>
+          <span id="stat-edges">0 conexiones</span>
         </div>
-        <button id="btn-export-mmd" class="btn-ghost" style="width: 100%; justify-content: center;" title="Descargar archivo .mmd">
-          💾 Descargar Archivo .mmd
+        <button id="btn-download" class="btn-ghost" style="width:100%;justify-content:center;">
+          💾 Descargar .mmd
         </button>
       </div>
     </aside>
-
   </div>
 
-  <!-- Toast Notification Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <!-- Core App Logic -->
   <script src="app.js"></script>
 </body>
 </html>

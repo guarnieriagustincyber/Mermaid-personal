@@ -1,1202 +1,882 @@
 /**
- * MermaidFlow Studio - Native Visual Flowchart & Mermaid Code Generator
+ * MermaidFlow Studio v2 — Mermaid-Native Interactive Editor
+ * Work directly on the rendered Mermaid diagram.
  */
-
 (function () {
   'use strict';
 
-  // --- STATE MANAGEMENT ---
+  // ── Shape Config ──
+  const SHAPES = {
+    terminal:   { prefix: '([', suffix: '])', text: 'Inicio' },
+    process:    { prefix: '[',  suffix: ']',  text: 'Proceso' },
+    decision:   { prefix: '{',  suffix: '}',  text: '¿Condición?' },
+    database:   { prefix: '[(', suffix: ')]', text: 'Base de Datos' },
+    io:         { prefix: '[/', suffix: '/]', text: 'Leer Datos' },
+    subroutine: { prefix: '[[', suffix: ']]', text: 'Subproceso()' }
+  };
+
+  // ── State ──
   const state = {
-    nodes: [],
-    edges: [],
+    nodes: [],      // { id, type, label }
+    edges: [],      // { from, to, label, style }
+    direction: 'TD',
     selectedNodeId: null,
-    selectedEdgeId: null,
-    editingNodeId: null,
-    direction: 'TD', // TD, LR, BT, RL
-    pan: { x: 80, y: 80 },
+    selectedEdgeIdx: null,
+    connectFromId: null,
     zoom: 1,
-    isPanning: false,
-    panStart: { x: 0, y: 0 },
-    dragNodeId: null,
-    dragStart: { x: 0, y: 0 },
-    nodeStartPos: { x: 0, y: 0 },
-    connectingFrom: null, // { nodeId, port }
-    tempEdgeEnd: { x: 0, y: 0 },
+    theme: 'dark',
     history: [],
-    historyIndex: -1,
-    theme: 'dark'
+    historyIdx: -1
   };
 
-  // Node Shape Configurations
-  const NODE_TYPES = {
-    terminal: { name: 'Inicio / Fin', prefix: '([', suffix: '])', shapeClass: 'shape-terminal', defaultText: 'Inicio' },
-    process: { name: 'Proceso', prefix: '[', suffix: ']', shapeClass: 'shape-process', defaultText: 'Proceso' },
-    decision: { name: 'Decisión', prefix: '{', suffix: '}', shapeClass: 'shape-decision', defaultText: '¿Es válido?' },
-    database: { name: 'Base de Datos', prefix: '[(', suffix: ')]', shapeClass: 'shape-database', defaultText: 'Base de Datos' },
-    io: { name: 'Entrada / Salida', prefix: '[/', suffix: '/]', shapeClass: 'shape-io', defaultText: 'Leer Datos' },
-    subroutine: { name: 'Subrutina', prefix: '[[', suffix: ']]', shapeClass: 'shape-subroutine', defaultText: 'Subproceso()' }
-  };
-
-  // DOM Elements Cache
+  // ── DOM Cache ──
+  const $ = id => document.getElementById(id);
   const dom = {
-    canvasWrapper: document.getElementById('canvas-wrapper'),
-    graphCanvas: document.getElementById('graph-canvas'),
-    nodesLayer: document.getElementById('nodes-layer'),
-    svgLayer: document.getElementById('svg-layer'),
-    edgesGroup: document.getElementById('edges-group'),
-    tempEdge: document.getElementById('temp-edge'),
-    mermaidCode: document.getElementById('mermaid-code'),
-    copyBtn: document.getElementById('btn-copy'),
-    autoLayoutBtn: document.getElementById('btn-auto-layout'),
-    directionSelect: document.getElementById('select-direction'),
-    zoomInBtn: document.getElementById('btn-zoom-in'),
-    zoomOutBtn: document.getElementById('btn-zoom-out'),
-    zoomResetBtn: document.getElementById('btn-zoom-reset'),
-    zoomLevel: document.getElementById('zoom-level'),
-    nodeCount: document.getElementById('node-count'),
-    edgeCount: document.getElementById('edge-count'),
-    themeToggleBtn: document.getElementById('btn-theme-toggle'),
-    templateSelect: document.getElementById('select-template'),
-    clearBtn: document.getElementById('btn-clear'),
-    exportMmdBtn: document.getElementById('btn-export-mmd'),
-    toastContainer: document.getElementById('toast-container'),
-    edgePopover: document.getElementById('edge-popover'),
-    edgeLabelInput: document.getElementById('edge-label-input'),
-    edgeStyleSelect: document.getElementById('edge-style-select'),
-    btnDeleteEdge: document.getElementById('btn-delete-edge')
+    workspace:    $('diagram-workspace'),
+    scroll:       $('diagram-scroll'),
+    container:    $('diagram-container'),
+    actionBar:    $('node-action-bar'),
+    edgePopover:  $('edge-popover'),
+    edgeLabelIn:  $('edge-label-input'),
+    edgeStyleSel: $('edge-style-select'),
+    btnDelEdge:   $('btn-delete-edge'),
+    inlineEditor: $('inline-editor'),
+    connectBanner:$('connect-banner'),
+    cancelConnect:$('btn-cancel-connect'),
+    codeArea:     $('mermaid-code'),
+    btnCopy:      $('btn-copy'),
+    btnClear:     $('btn-clear'),
+    btnTheme:     $('btn-theme'),
+    btnDownload:  $('btn-download'),
+    dirSelect:    $('select-direction'),
+    tplSelect:    $('select-template'),
+    zoomIn:       $('btn-zoom-in'),
+    zoomOut:      $('btn-zoom-out'),
+    zoomFit:      $('btn-zoom-fit'),
+    zoomLabel:    $('zoom-level'),
+    statNodes:    $('stat-nodes'),
+    statEdges:    $('stat-edges'),
+    toasts:       $('toast-container')
   };
 
-  // --- INITIALIZATION ---
+  let renderCounter = 0;
+
+  // ── Init ──
   function init() {
     loadTheme();
-    setupEventListeners();
-    setupPaletteClicks();
+    initMermaid();
+    wireEvents();
 
-    if (!loadFromLocalStorage()) {
-      loadTemplate('auth');
-    }
-
-    updateTransform();
-    render();
-    saveState();
-
-    setTimeout(() => {
-      autoLayout(false);
-    }, 100);
+    if (!loadFromStorage()) loadTemplate('auth');
+    else renderDiagram();
   }
 
-  // --- LOCAL STORAGE & HISTORY ---
-  function saveState() {
-    const snapshot = JSON.stringify({
-      nodes: state.nodes,
-      edges: state.edges,
-      direction: state.direction
+  function initMermaid() {
+    if (typeof mermaid === 'undefined') {
+      dom.container.innerHTML = '<div class="empty-state"><h2>Cargando Mermaid.js...</h2><p>Asegúrate de tener conexión a internet.</p></div>';
+      return;
+    }
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: state.theme === 'dark' ? 'dark' : 'default',
+      securityLevel: 'loose',
+      flowchart: { curve: 'basis', htmlLabels: true, useMaxWidth: false }
     });
+  }
 
-    if (state.historyIndex < state.history.length - 1) {
-      state.history = state.history.slice(0, state.historyIndex + 1);
+  // ── Persistence ──
+  function snapshot() {
+    return JSON.stringify({ nodes: state.nodes, edges: state.edges, direction: state.direction });
+  }
+
+  function pushHistory() {
+    const snap = snapshot();
+    if (state.historyIdx < state.history.length - 1) {
+      state.history = state.history.slice(0, state.historyIdx + 1);
     }
-    state.history.push(snapshot);
-    state.historyIndex++;
-
-    try {
-      localStorage.setItem('mermaidflow_data', snapshot);
-    } catch (e) {
-      console.warn('LocalStorage error', e);
-    }
-
-    updateMermaidCode();
+    state.history.push(snap);
+    state.historyIdx++;
+    try { localStorage.setItem('mermaidflow_v2', snap); } catch (e) {}
+    updateCode();
     updateStats();
   }
 
   function undo() {
-    if (state.historyIndex > 0) {
-      state.historyIndex--;
-      restoreSnapshot(state.history[state.historyIndex]);
-      showToast('↩️ Deshacer');
+    if (state.historyIdx > 0) {
+      state.historyIdx--;
+      restore(state.history[state.historyIdx]);
+      toast('↩ Deshacer');
     }
   }
 
   function redo() {
-    if (state.historyIndex < state.history.length - 1) {
-      state.historyIndex++;
-      restoreSnapshot(state.history[state.historyIndex]);
-      showToast('↪️ Rehacer');
+    if (state.historyIdx < state.history.length - 1) {
+      state.historyIdx++;
+      restore(state.history[state.historyIdx]);
+      toast('↪ Rehacer');
     }
   }
 
-  function restoreSnapshot(snapshotStr) {
+  function restore(snap) {
     try {
-      const data = JSON.parse(snapshotStr);
-      state.nodes = data.nodes || [];
-      state.edges = data.edges || [];
-      state.direction = data.direction || 'TD';
-      if (dom.directionSelect) dom.directionSelect.value = state.direction;
-      state.selectedNodeId = null;
-      state.selectedEdgeId = null;
-      hideEdgePopover();
-      render();
-      updateMermaidCode();
-      updateStats();
-    } catch (e) {
-      console.error(e);
-    }
+      const d = JSON.parse(snap);
+      state.nodes = d.nodes || [];
+      state.edges = d.edges || [];
+      state.direction = d.direction || 'TD';
+      dom.dirSelect.value = state.direction;
+      deselect();
+      renderDiagram();
+    } catch (e) { console.error(e); }
   }
 
-  function loadFromLocalStorage() {
+  function loadFromStorage() {
     try {
-      const saved = localStorage.getItem('mermaidflow_data');
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.nodes && data.nodes.length > 0) {
-          state.nodes = data.nodes;
-          state.edges = data.edges || [];
-          state.direction = data.direction || 'TD';
-          if (dom.directionSelect) dom.directionSelect.value = state.direction;
+      const s = localStorage.getItem('mermaidflow_v2');
+      if (s) {
+        const d = JSON.parse(s);
+        if (d.nodes && d.nodes.length > 0) {
+          state.nodes = d.nodes;
+          state.edges = d.edges || [];
+          state.direction = d.direction || 'TD';
+          dom.dirSelect.value = state.direction;
           return true;
         }
       }
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) {}
     return false;
   }
 
-  // --- THEME ---
+  // ── Theme ──
   function loadTheme() {
-    const savedTheme = localStorage.getItem('mermaidflow_theme') || 'dark';
-    state.theme = savedTheme;
-    document.documentElement.setAttribute('data-theme', savedTheme);
+    state.theme = localStorage.getItem('mermaidflow_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', state.theme);
   }
 
   function toggleTheme() {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', state.theme);
     localStorage.setItem('mermaidflow_theme', state.theme);
-    showToast(state.theme === 'dark' ? 'Modo Oscuro' : 'Modo Claro');
+    initMermaid();
+    renderDiagram();
+    toast(state.theme === 'dark' ? '🌙 Modo Oscuro' : '☀️ Modo Claro');
   }
 
-  // --- NODE & EDGE OPERATIONS ---
-  function createNode(type, x, y, label = null) {
-    const typeDef = NODE_TYPES[type] || NODE_TYPES.process;
-    
-    let idCandidate = `N${state.nodes.length + 1}`;
-    let counter = 1;
-    while (state.nodes.some(n => n.id === idCandidate)) {
-      counter++;
-      idCandidate = `N${counter}`;
+  // ── ID Generator ──
+  function nextId() {
+    const used = new Set(state.nodes.map(n => n.id));
+    for (let i = 0; i < 702; i++) {
+      let id;
+      if (i < 26) id = String.fromCharCode(65 + i);
+      else id = String.fromCharCode(65 + Math.floor((i - 26) / 26)) + String.fromCharCode(65 + (i - 26) % 26);
+      if (!used.has(id)) return id;
     }
+    return 'N' + Date.now().toString(36).slice(-4);
+  }
 
-    const node = {
-      id: idCandidate,
-      type: type,
-      label: label || typeDef.defaultText,
-      x: Math.round(x),
-      y: Math.round(y),
-      width: type === 'decision' ? 160 : 150,
-      height: type === 'decision' ? 66 : 56
-    };
-
+  // ── Data Operations ──
+  function addNode(type, label) {
+    const shape = SHAPES[type] || SHAPES.process;
+    const node = { id: nextId(), type, label: label || shape.text };
     state.nodes.push(node);
-    state.selectedNodeId = node.id;
-    state.selectedEdgeId = null;
-    hideEdgePopover();
-    
-    render();
-    saveState();
+    deselect();
+    pushHistory();
+    renderDiagram().then(() => {
+      selectNode(node.id);
+    });
     return node;
   }
 
-  function createEdge(fromNodeId, toNodeId, fromPort = 'bottom', toPort = 'top', label = '', style = 'normal') {
-    if (fromNodeId === toNodeId) return null;
-
-    const exists = state.edges.some(e => e.from === fromNodeId && e.to === toNodeId);
-    if (exists) return null;
-
-    const edge = {
-      id: `e_${fromNodeId}_${toNodeId}_${Date.now().toString(36)}`,
-      from: fromNodeId,
-      to: toNodeId,
-      fromPort: fromPort,
-      toPort: toPort,
-      label: label,
-      style: style
-    };
-
+  function addEdge(from, to, label, style) {
+    if (from === to) return null;
+    if (state.edges.some(e => e.from === from && e.to === to)) return null;
+    const edge = { from, to, label: label || '', style: style || 'normal' };
     state.edges.push(edge);
-    state.selectedEdgeId = edge.id;
-    state.selectedNodeId = null;
-
-    render();
-    saveState();
-
-    // If connecting from a decision node and no label set yet, show condition popover automatically
-    const fromNode = state.nodes.find(n => n.id === fromNodeId);
-    if (fromNode && fromNode.type === 'decision' && !label) {
-      setTimeout(() => {
-        showEdgePopoverForEdge(edge);
-      }, 50);
-    }
-
+    pushHistory();
+    renderDiagram();
     return edge;
   }
 
-  // Quick Smart Append (adds connected child node in 1 click)
-  function quickAddBranch(fromNodeId, conditionLabel = '') {
-    const fromNode = state.nodes.find(n => n.id === fromNodeId);
-    if (!fromNode) return;
-
-    const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
-    let newX = fromNode.x;
-    let newY = fromNode.y;
-
-    if (conditionLabel === 'Sí') {
-      newX = isHorizontal ? fromNode.x + 220 : fromNode.x - 120;
-      newY = isHorizontal ? fromNode.y - 80 : fromNode.y + 130;
-    } else if (conditionLabel === 'No') {
-      newX = isHorizontal ? fromNode.x + 220 : fromNode.x + 120;
-      newY = isHorizontal ? fromNode.y + 80 : fromNode.y + 130;
-    } else {
-      newX = isHorizontal ? fromNode.x + 220 : fromNode.x;
-      newY = isHorizontal ? fromNode.y : fromNode.y + 130;
-    }
-
-    const nextType = fromNode.type === 'terminal' && fromNode.label.toLowerCase().includes('fin') ? 'process' : 'process';
-    const nextText = conditionLabel === 'Sí' ? 'Acción Sí' : (conditionLabel === 'No' ? 'Acción No' : 'Siguiente Paso');
-
-    const newNode = createNode(nextType, newX, newY, nextText);
-    createEdge(fromNode.id, newNode.id, 'bottom', 'top', conditionLabel, 'normal');
-    
-    // Smooth Auto-Layout to keep the whole tree neat
-    autoLayout(true);
+  function deleteNode(id) {
+    state.nodes = state.nodes.filter(n => n.id !== id);
+    state.edges = state.edges.filter(e => e.from !== id && e.to !== id);
+    deselect();
+    pushHistory();
+    renderDiagram();
   }
 
-  function deleteSelected() {
-    let changed = false;
-    if (state.selectedNodeId) {
-      const id = state.selectedNodeId;
-      state.nodes = state.nodes.filter(n => n.id !== id);
-      state.edges = state.edges.filter(e => e.from !== id && e.to !== id);
-      state.selectedNodeId = null;
-      changed = true;
-    } else if (state.selectedEdgeId) {
-      const id = state.selectedEdgeId;
-      state.edges = state.edges.filter(e => e.id !== id);
-      state.selectedEdgeId = null;
-      hideEdgePopover();
-      changed = true;
-    }
-
-    if (changed) {
-      render();
-      saveState();
-      showToast('Elemento eliminado');
+  function deleteEdge(idx) {
+    if (idx >= 0 && idx < state.edges.length) {
+      state.edges.splice(idx, 1);
+      deselect();
+      pushHistory();
+      renderDiagram();
     }
   }
 
-  // --- SMART AUTO-LAYOUT ENGINE ---
-  function autoLayout(animate = true) {
-    if (state.nodes.length === 0) return;
-
-    const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
-    const isReversed = state.direction === 'BT' || state.direction === 'RL';
-
-    const inDegree = {};
-    const adj = {};
-    
-    state.nodes.forEach(n => {
-      inDegree[n.id] = 0;
-      adj[n.id] = [];
-    });
-
-    state.edges.forEach(e => {
-      if (adj[e.from] && inDegree[e.to] !== undefined) {
-        adj[e.from].push(e.to);
-        inDegree[e.to] = (inDegree[e.to] || 0) + 1;
-      }
-    });
-
-    const ranks = {};
-    const queue = [];
-
-    // Root nodes
-    state.nodes.forEach(n => {
-      if (inDegree[n.id] === 0) {
-        ranks[n.id] = 0;
-        queue.push(n.id);
-      }
-    });
-
-    if (queue.length === 0 && state.nodes.length > 0) {
-      ranks[state.nodes[0].id] = 0;
-      queue.push(state.nodes[0].id);
-    }
-
-    let maxRank = 0;
-    const visited = new Set();
-    while (queue.length > 0) {
-      const u = queue.shift();
-      visited.add(u);
-      const currentRank = ranks[u] || 0;
-
-      (adj[u] || []).forEach(v => {
-        const nextRank = currentRank + 1;
-        if (ranks[v] === undefined || nextRank > ranks[v]) {
-          ranks[v] = nextRank;
-          if (nextRank > maxRank) maxRank = nextRank;
-        }
-        if (!visited.has(v)) {
-          queue.push(v);
-        }
-      });
-    }
-
-    state.nodes.forEach(n => {
-      if (ranks[n.id] === undefined) ranks[n.id] = 0;
-    });
-
-    const layers = [];
-    for (let r = 0; r <= maxRank; r++) {
-      layers[r] = [];
-    }
-    state.nodes.forEach(n => {
-      const r = ranks[n.id] || 0;
-      layers[r].push(n);
-    });
-
-    const layerSpacing = isHorizontal ? 260 : 130;
-    const nodeSpacing = isHorizontal ? 100 : 210;
-    const startX = 140;
-    const startY = 90;
-
-    const targetPositions = {};
-
-    layers.forEach((layerNodes, r) => {
-      const layerIndex = isReversed ? (layers.length - 1 - r) : r;
-      const totalSpan = (layerNodes.length - 1) * nodeSpacing;
-      
-      layerNodes.forEach((node, i) => {
-        const offset = (i * nodeSpacing) - (totalSpan / 2);
-
-        if (isHorizontal) {
-          targetPositions[node.id] = {
-            x: startX + (layerIndex * layerSpacing),
-            y: startY + 240 + offset
-          };
-        } else {
-          targetPositions[node.id] = {
-            x: startX + 360 + offset,
-            y: startY + (layerIndex * layerSpacing)
-          };
-        }
-      });
-    });
-
-    if (animate) {
-      animateLayout(targetPositions);
-    } else {
-      state.nodes.forEach(node => {
-        if (targetPositions[node.id]) {
-          node.x = targetPositions[node.id].x;
-          node.y = targetPositions[node.id].y;
-        }
-      });
-      render();
-      saveState();
+  function updateNodeLabel(id, newLabel) {
+    const node = state.nodes.find(n => n.id === id);
+    if (node) {
+      node.label = newLabel || SHAPES[node.type].text;
+      pushHistory();
+      renderDiagram().then(() => selectNode(id));
     }
   }
 
-  function animateLayout(targetPositions) {
-    const startTime = performance.now();
-    const duration = 280;
-    const initialPositions = {};
-
-    state.nodes.forEach(node => {
-      initialPositions[node.id] = { x: node.x, y: node.y };
-    });
-
-    function step(now) {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const ease = 1 - Math.pow(1 - progress, 3);
-
-      state.nodes.forEach(node => {
-        const initial = initialPositions[node.id];
-        const target = targetPositions[node.id];
-        if (initial && target) {
-          node.x = initial.x + (target.x - initial.x) * ease;
-          node.y = initial.y + (target.y - initial.y) * ease;
-        }
-      });
-
-      render();
-
-      if (progress < 1) {
-        requestAnimationFrame(step);
-      } else {
-        saveState();
-      }
+  function updateEdgeLabel(idx, label) {
+    if (idx >= 0 && idx < state.edges.length) {
+      state.edges[idx].label = label;
+      pushHistory();
+      renderDiagram();
     }
-
-    requestAnimationFrame(step);
   }
 
-  // --- MERMAID GENERATOR (SERIALIZER) ---
-  function generateMermaidCode() {
-    if (state.nodes.length === 0) {
-      return `flowchart ${state.direction}\n    %% Lienzo vacío`;
+  function updateEdgeStyle(idx, style) {
+    if (idx >= 0 && idx < state.edges.length) {
+      state.edges[idx].style = style;
+      pushHistory();
+      renderDiagram();
     }
+  }
 
+  // ── Quick Add Branches ──
+  function quickAddBranch(fromId, condition) {
+    const from = state.nodes.find(n => n.id === fromId);
+    if (!from) return;
+    const newNode = { id: nextId(), type: 'process', label: condition ? `Acción ${condition}` : 'Siguiente Paso' };
+    state.nodes.push(newNode);
+    state.edges.push({ from: fromId, to: newNode.id, label: condition || '', style: 'normal' });
+    deselect();
+    pushHistory();
+    renderDiagram().then(() => selectNode(newNode.id));
+  }
+
+  // ── Mermaid Code Generator ──
+  function generateCode() {
+    if (state.nodes.length === 0) return `flowchart ${state.direction}\n    %% Diagrama vacío`;
     let code = `flowchart ${state.direction}\n`;
-
-    // 1. Declare Nodes
-    code += `    %% Nodos\n`;
-    state.nodes.forEach(node => {
-      const typeDef = NODE_TYPES[node.type] || NODE_TYPES.process;
-      const cleanLabel = (node.label || 'Nodo')
-        .replace(/"/g, "'")
-        .replace(/\n/g, '<br/>');
-      
-      code += `    ${node.id}${typeDef.prefix}"${cleanLabel}"${typeDef.suffix}\n`;
+    state.nodes.forEach(n => {
+      const s = SHAPES[n.type] || SHAPES.process;
+      const lbl = (n.label || 'Nodo').replace(/"/g, "'").replace(/\n/g, '<br/>');
+      code += `    ${n.id}${s.prefix}"${lbl}"${s.suffix}\n`;
     });
-
-    // 2. Declare Edges
     if (state.edges.length > 0) {
-      code += `\n    %% Conexiones\n`;
-      state.edges.forEach(edge => {
-        let connector = '-->';
-        if (edge.style === 'dotted') connector = '-.->';
-        else if (edge.style === 'thick') connector = '==>';
-        else if (edge.style === 'open') connector = '---';
-
-        const label = (edge.label || '').trim();
-        if (label) {
-          const cleanLabel = label.replace(/"/g, "'");
-          if (edge.style === 'normal' || !edge.style) {
-            code += `    ${edge.from} -- "${cleanLabel}" --> ${edge.to}\n`;
-          } else {
-            code += `    ${edge.from} ${connector}|"${cleanLabel}"| ${edge.to}\n`;
-          }
+      code += '\n';
+      state.edges.forEach(e => {
+        let arr = '-->';
+        if (e.style === 'thick') arr = '==>';
+        else if (e.style === 'dotted') arr = '-.->';
+        const lbl = (e.label || '').trim();
+        if (lbl) {
+          const clean = lbl.replace(/"/g, "'");
+          code += `    ${e.from} ${arr}|"${clean}"| ${e.to}\n`;
         } else {
-          code += `    ${edge.from} ${connector} ${edge.to}\n`;
+          code += `    ${e.from} ${arr} ${e.to}\n`;
         }
       });
     }
-
     return code;
   }
 
-  function updateMermaidCode() {
-    const code = generateMermaidCode();
-    if (dom.mermaidCode) {
-      dom.mermaidCode.value = code;
-    }
-  }
-
-  // --- RENDERING CANVAS ---
-  function render() {
-    renderNodes();
-    renderEdges();
-  }
-
-  function renderNodes() {
-    if (!dom.nodesLayer) return;
-    dom.nodesLayer.innerHTML = '';
-
-    state.nodes.forEach(node => {
-      const typeDef = NODE_TYPES[node.type] || NODE_TYPES.process;
-      const isSelected = state.selectedNodeId === node.id;
-      const isEditing = state.editingNodeId === node.id;
-
-      const nodeEl = document.createElement('div');
-      nodeEl.className = `canvas-node ${typeDef.shapeClass} ${isSelected ? 'selected' : ''}`;
-      nodeEl.style.left = `${node.x}px`;
-      nodeEl.style.top = `${node.y}px`;
-      nodeEl.dataset.id = node.id;
-
-      // Smart Action Buttons when Node is Selected
-      const actions = document.createElement('div');
-      actions.className = 'node-actions';
-
-      if (node.type === 'decision') {
-        // Quick + Sí / + No branches for decisions
-        actions.innerHTML = `
-          <button class="action-btn btn-quick-yes" data-action="quick-yes">🟢 + Sí</button>
-          <button class="action-btn btn-quick-no" data-action="quick-no">🔴 + No</button>
-          <button class="action-btn btn-del" data-action="delete" title="Borrar">🗑️</button>
-        `;
-      } else {
-        // Quick + Next step for regular nodes
-        actions.innerHTML = `
-          <button class="action-btn btn-quick-next" data-action="quick-next">➕ + Siguiente</button>
-          <button class="action-btn btn-del" data-action="delete" title="Borrar">🗑️</button>
-        `;
-      }
-      nodeEl.appendChild(actions);
-
-      // Node Content (Text or Input)
-      if (isEditing) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'node-input';
-        input.value = node.label;
-        input.addEventListener('blur', () => {
-          node.label = input.value.trim() || typeDef.defaultText;
-          state.editingNodeId = null;
-          render();
-          saveState();
-        });
-        input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') input.blur();
-          if (e.key === 'Escape') {
-            state.editingNodeId = null;
-            render();
-          }
-        });
-        nodeEl.appendChild(input);
-        setTimeout(() => input.focus(), 10);
-      } else {
-        const content = document.createElement('div');
-        content.className = 'node-content';
-        content.innerHTML = (node.label || typeDef.defaultText).replace(/\n/g, '<br/>');
-        nodeEl.appendChild(content);
-      }
-
-      // 4 Magnetic Connection Ports
-      ['top', 'right', 'bottom', 'left'].forEach(portPos => {
-        const port = document.createElement('div');
-        port.className = `port port-${portPos}`;
-        port.dataset.port = portPos;
-        port.dataset.nodeId = node.id;
-        nodeEl.appendChild(port);
-      });
-
-      dom.nodesLayer.appendChild(nodeEl);
-    });
-  }
-
-  function renderEdges() {
-    if (!dom.edgesGroup) return;
-    dom.edgesGroup.innerHTML = '';
-
-    state.edges.forEach(edge => {
-      const fromNode = state.nodes.find(n => n.id === edge.from);
-      const toNode = state.nodes.find(n => n.id === edge.to);
-      if (!fromNode || !toNode) return;
-
-      const p1 = getPortPosition(fromNode, edge.fromPort || 'bottom');
-      const p2 = getPortPosition(toNode, edge.toPort || 'top');
-      const isSelected = state.selectedEdgeId === edge.id;
-
-      const pathData = calculateSmoothPath(p1, p2, edge.fromPort, edge.toPort);
-
-      // Invisible fat hit area for easy clicking
-      const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      hitPath.setAttribute('d', pathData);
-      hitPath.setAttribute('class', 'edge-hit-area');
-      hitPath.dataset.edgeId = edge.id;
-      dom.edgesGroup.appendChild(hitPath);
-
-      // Visible stroke
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', pathData);
-      path.setAttribute('class', `edge-path ${edge.style || 'normal'} ${isSelected ? 'selected' : ''}`);
-      path.setAttribute('marker-end', isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
-      path.dataset.edgeId = edge.id;
-      dom.edgesGroup.appendChild(path);
-
-      // Render Edge Label if present
-      const labelText = (edge.label || '').trim();
-      const midPoint = getPathMidpoint(p1, p2);
-
-      const labelGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      labelGroup.setAttribute('class', 'edge-label-group');
-      labelGroup.dataset.edgeId = edge.id;
-
-      let labelClass = 'edge-label-bg';
-      if (labelText.toLowerCase() === 'sí' || labelText.toLowerCase() === 'si') labelClass += ' label-yes';
-      if (labelText.toLowerCase() === 'no') labelClass += ' label-no';
-
-      const displayStr = labelText || (isSelected ? '+ Condición' : '');
-      if (displayStr) {
-        const textLen = Math.max(displayStr.length * 8 + 18, 38);
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', midPoint.x - textLen / 2);
-        rect.setAttribute('y', midPoint.y - 12);
-        rect.setAttribute('width', textLen);
-        rect.setAttribute('height', 24);
-        rect.setAttribute('class', labelClass);
-
-        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        text.setAttribute('x', midPoint.x);
-        text.setAttribute('y', midPoint.y);
-        text.setAttribute('class', 'edge-label-text');
-        text.textContent = displayStr;
-
-        labelGroup.appendChild(rect);
-        labelGroup.appendChild(text);
-        dom.edgesGroup.appendChild(labelGroup);
-      }
-    });
-  }
-
-  function getPortPosition(node, port) {
-    const w = node.width || 150;
-    const h = node.height || 56;
-    switch (port) {
-      case 'top': return { x: node.x + w / 2, y: node.y };
-      case 'bottom': return { x: node.x + w / 2, y: node.y + h };
-      case 'left': return { x: node.x, y: node.y + h / 2 };
-      case 'right': return { x: node.x + w, y: node.y + h / 2 };
-      default: return { x: node.x + w / 2, y: node.y + h };
-    }
-  }
-
-  function calculateSmoothPath(p1, p2, fromPort, toPort) {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const curvature = Math.min(dist * 0.45, 80);
-
-    let cx1 = p1.x;
-    let cy1 = p1.y;
-    let cx2 = p2.x;
-    let cy2 = p2.y;
-
-    if (fromPort === 'bottom') cy1 += curvature;
-    else if (fromPort === 'top') cy1 -= curvature;
-    else if (fromPort === 'left') cx1 -= curvature;
-    else if (fromPort === 'right') cx1 += curvature;
-
-    if (toPort === 'bottom') cy2 += curvature;
-    else if (toPort === 'top') cy2 -= curvature;
-    else if (toPort === 'left') cx2 -= curvature;
-    else if (toPort === 'right') cx2 += curvature;
-
-    return `M ${p1.x} ${p1.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${p2.x} ${p2.y}`;
-  }
-
-  function getPathMidpoint(p1, p2) {
-    return {
-      x: (p1.x + p2.x) / 2,
-      y: (p1.y + p2.y) / 2
-    };
-  }
-
-  // --- EVENT LISTENERS ---
-  function setupEventListeners() {
-    window.addEventListener('resize', updateTransform);
-    window.addEventListener('keydown', handleKeyboardShortcuts);
-
-    // Canvas Events
-    dom.canvasWrapper.addEventListener('wheel', handleWheel, { passive: false });
-    dom.canvasWrapper.addEventListener('mousedown', handleCanvasMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    // Double click on canvas background -> Quick Process Node
-    dom.canvasWrapper.addEventListener('dblclick', (e) => {
-      if (e.target === dom.canvasWrapper || e.target.id === 'svg-layer' || e.target.id === 'graph-canvas') {
-        const pt = screenToCanvas(e.clientX, e.clientY);
-        createNode('process', pt.x - 75, pt.y - 28);
-      }
-    });
-
-    // Top Bar Actions
-    if (dom.copyBtn) dom.copyBtn.addEventListener('click', copyMermaidCode);
-    if (dom.autoLayoutBtn) dom.autoLayoutBtn.addEventListener('click', () => autoLayout(true));
-    if (dom.directionSelect) {
-      dom.directionSelect.addEventListener('change', (e) => {
-        state.direction = e.target.value;
-        autoLayout(true);
-        saveState();
-      });
-    }
-
-    if (dom.zoomInBtn) dom.zoomInBtn.addEventListener('click', () => setZoom(state.zoom + 0.15));
-    if (dom.zoomOutBtn) dom.zoomOutBtn.addEventListener('click', () => setZoom(state.zoom - 0.15));
-    if (dom.zoomResetBtn) dom.zoomResetBtn.addEventListener('click', () => {
-      state.zoom = 1;
-      state.pan = { x: 80, y: 80 };
-      updateTransform();
-    });
-
-    if (dom.themeToggleBtn) dom.themeToggleBtn.addEventListener('click', toggleTheme);
-
-    if (dom.templateSelect) {
-      dom.templateSelect.addEventListener('change', (e) => {
-        if (e.target.value) {
-          loadTemplate(e.target.value);
-          e.target.value = '';
-        }
-      });
-    }
-
-    if (dom.clearBtn) {
-      dom.clearBtn.addEventListener('click', () => {
-        if (confirm('¿Limpiar todo el lienzo?')) {
-          state.nodes = [];
-          state.edges = [];
-          state.selectedNodeId = null;
-          state.selectedEdgeId = null;
-          hideEdgePopover();
-          render();
-          saveState();
-          showToast('Lienzo limpio');
-        }
-      });
-    }
-
-    if (dom.exportMmdBtn) dom.exportMmdBtn.addEventListener('click', exportMmd);
-
-    // Edge Popover Controls (DIRECT EVENT BINDINGS)
-    setupEdgePopoverEvents();
-  }
-
-  function setupPaletteClicks() {
-    const paletteCards = document.querySelectorAll('.palette-card');
-    paletteCards.forEach(card => {
-      card.addEventListener('click', () => {
-        const rect = dom.canvasWrapper.getBoundingClientRect();
-        const center = screenToCanvas(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        createNode(card.dataset.type, center.x - 75, center.y - 28);
-      });
-    });
-  }
-
-  function setupEdgePopoverEvents() {
-    // Condition Pills (Sí, No, OK, Sin Etiqueta)
-    const pills = document.querySelectorAll('.condition-pill');
-    pills.forEach(pill => {
-      pill.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const val = pill.dataset.val;
-        const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
-        if (edge) {
-          edge.label = val;
-          if (dom.edgeLabelInput) dom.edgeLabelInput.value = val;
-          render();
-          saveState();
-          showToast(`Condición: "${val || 'Ninguna'}"`);
-        }
-      });
-    });
-
-    // Custom Label Input
-    if (dom.edgeLabelInput) {
-      dom.edgeLabelInput.addEventListener('input', (e) => {
-        const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
-        if (edge) {
-          edge.label = e.target.value;
-          render();
-          saveState();
-        }
-      });
-    }
-
-    // Arrow Style Select
-    if (dom.edgeStyleSelect) {
-      dom.edgeStyleSelect.addEventListener('change', (e) => {
-        const edge = state.edges.find(ed => ed.id === state.selectedEdgeId);
-        if (edge) {
-          edge.style = e.target.value;
-          render();
-          saveState();
-        }
-      });
-    }
-
-    // Delete Edge Button
-    if (dom.btnDeleteEdge) {
-      dom.btnDeleteEdge.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteSelected();
-      });
-    }
-  }
-
-  // --- MOUSE & TOUCH HANDLERS ---
-  function handleCanvasMouseDown(e) {
-    // 1. Click on connection port (start edge)
-    if (e.target.classList.contains('port')) {
-      e.stopPropagation();
-      const nodeId = e.target.dataset.nodeId;
-      const port = e.target.dataset.port;
-      const node = state.nodes.find(n => n.id === nodeId);
-      if (node) {
-        state.connectingFrom = { nodeId, port };
-        const p = getPortPosition(node, port);
-        state.tempEdgeEnd = p;
-        dom.tempEdge.style.display = 'block';
-        dom.tempEdge.setAttribute('d', `M ${p.x} ${p.y} L ${p.x} ${p.y}`);
-      }
-      return;
-    }
-
-    // 2. Click on Node Action Buttons (+ Sí, + No, + Siguiente, Borrar)
-    const actionBtn = e.target.closest('.action-btn');
-    if (actionBtn) {
-      e.stopPropagation();
-      const action = actionBtn.dataset.action;
-      const node = state.nodes.find(n => n.id === state.selectedNodeId);
-      if (!node) return;
-
-      if (action === 'quick-yes') {
-        quickAddBranch(node.id, 'Sí');
-      } else if (action === 'quick-no') {
-        quickAddBranch(node.id, 'No');
-      } else if (action === 'quick-next') {
-        quickAddBranch(node.id, '');
-      } else if (action === 'delete') {
-        deleteSelected();
-      }
-      return;
-    }
-
-    // 3. Click on Node
-    const nodeEl = e.target.closest('.canvas-node');
-    if (nodeEl) {
-      e.stopPropagation();
-      const nodeId = nodeEl.dataset.id;
-
-      // Double click -> Inline edit
-      if (state.selectedNodeId === nodeId && e.detail === 2) {
-        state.editingNodeId = nodeId;
-        render();
-        return;
-      }
-
-      state.selectedNodeId = nodeId;
-      state.selectedEdgeId = null;
-      hideEdgePopover();
-      state.dragNodeId = nodeId;
-      state.dragStart = { x: e.clientX, y: e.clientY };
-      const n = state.nodes.find(nod => nod.id === nodeId);
-      state.nodeStartPos = { x: n.x, y: n.y };
-      render();
-      return;
-    }
-
-    // 4. Click on Edge or Edge Label
-    const edgeEl = e.target.closest('.edge-path') || e.target.closest('.edge-hit-area') || e.target.closest('.edge-label-group');
-    if (edgeEl) {
-      e.stopPropagation();
-      const edgeId = edgeEl.dataset.edgeId;
-      selectEdge(edgeId, e.clientX, e.clientY);
-      return;
-    }
-
-    // 5. Click on Edge Popover itself -> Do not deselect
-    if (e.target.closest('#edge-popover')) {
-      return;
-    }
-
-    // 6. Click on Canvas Background -> Pan
-    state.selectedNodeId = null;
-    state.selectedEdgeId = null;
-    state.editingNodeId = null;
-    hideEdgePopover();
-    render();
-
-    state.isPanning = true;
-    state.panStart = { x: e.clientX - state.pan.x, y: e.clientY - state.pan.y };
-  }
-
-  function handleMouseMove(e) {
-    if (state.connectingFrom) {
-      const fromNode = state.nodes.find(n => n.id === state.connectingFrom.nodeId);
-      if (fromNode) {
-        const p1 = getPortPosition(fromNode, state.connectingFrom.port);
-        const pt = screenToCanvas(e.clientX, e.clientY);
-        const pathData = calculateSmoothPath(p1, pt, state.connectingFrom.port, 'top');
-        dom.tempEdge.setAttribute('d', pathData);
-      }
-      return;
-    }
-
-    if (state.dragNodeId) {
-      const dx = (e.clientX - state.dragStart.x) / state.zoom;
-      const dy = (e.clientY - state.dragStart.y) / state.zoom;
-      const node = state.nodes.find(n => n.id === state.dragNodeId);
-      if (node) {
-        node.x = Math.round(state.nodeStartPos.x + dx);
-        node.y = Math.round(state.nodeStartPos.y + dy);
-        render();
-      }
-      return;
-    }
-
-    if (state.isPanning) {
-      state.pan.x = e.clientX - state.panStart.x;
-      state.pan.y = e.clientY - state.panStart.y;
-      updateTransform();
-    }
-  }
-
-  function handleMouseUp(e) {
-    if (state.connectingFrom) {
-      dom.tempEdge.style.display = 'none';
-      const targetPort = e.target.closest('.port');
-      const targetNodeEl = e.target.closest('.canvas-node');
-
-      if (targetPort) {
-        const toNodeId = targetPort.dataset.nodeId;
-        const toPort = targetPort.dataset.port;
-        createEdge(state.connectingFrom.nodeId, toNodeId, state.connectingFrom.port, toPort);
-      } else if (targetNodeEl) {
-        const toNodeId = targetNodeEl.dataset.id;
-        createEdge(state.connectingFrom.nodeId, toNodeId, state.connectingFrom.port, 'top');
-      }
-
-      state.connectingFrom = null;
-    }
-
-    if (state.dragNodeId) {
-      state.dragNodeId = null;
-      saveState();
-    }
-
-    if (state.isPanning) {
-      state.isPanning = false;
-    }
-  }
-
-  function handleWheel(e) {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const rect = dom.canvasWrapper.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.3), 2.5);
-    state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
-    state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
-    state.zoom = newZoom;
-
-    updateTransform();
-  }
-
-  function setZoom(val) {
-    state.zoom = Math.min(Math.max(val, 0.3), 2.5);
-    updateTransform();
-  }
-
-  function updateTransform() {
-    if (dom.graphCanvas) {
-      dom.graphCanvas.style.transform = `translate(${state.pan.x}px, ${state.pan.y}px) scale(${state.zoom})`;
-    }
-    if (dom.zoomLevel) {
-      dom.zoomLevel.textContent = `${Math.round(state.zoom * 100)}%`;
-    }
-  }
-
-  function screenToCanvas(screenX, screenY) {
-    const rect = dom.canvasWrapper.getBoundingClientRect();
-    return {
-      x: (screenX - rect.left - state.pan.x) / state.zoom,
-      y: (screenY - rect.top - state.pan.y) / state.zoom
-    };
-  }
-
-  // --- EDGE SELECTION & POPOVER ---
-  function selectEdge(edgeId, screenX, screenY) {
-    state.selectedEdgeId = edgeId;
-    state.selectedNodeId = null;
-    render();
-
-    const edge = state.edges.find(e => e.id === edgeId);
-    if (edge) {
-      showEdgePopoverForEdge(edge, screenX, screenY);
-    }
-  }
-
-  function showEdgePopoverForEdge(edge, screenX, screenY) {
-    if (!dom.edgePopover) return;
-
-    if (dom.edgeLabelInput) dom.edgeLabelInput.value = edge.label || '';
-    if (dom.edgeStyleSelect) dom.edgeStyleSelect.value = edge.style || 'normal';
-
-    const rect = dom.canvasWrapper.getBoundingClientRect();
-    let popX = 0;
-    let popY = 0;
-
-    if (screenX !== undefined && screenY !== undefined) {
-      popX = screenX - rect.left + 15;
-      popY = screenY - rect.top - 20;
-    } else {
-      // Calculate from node positions
-      const fromNode = state.nodes.find(n => n.id === edge.from);
-      const toNode = state.nodes.find(n => n.id === edge.to);
-      if (fromNode && toNode) {
-        const mid = getPathMidpoint(
-          getPortPosition(fromNode, edge.fromPort || 'bottom'),
-          getPortPosition(toNode, edge.toPort || 'top')
-        );
-        popX = mid.x * state.zoom + state.pan.x + 20;
-        popY = mid.y * state.zoom + state.pan.y - 40;
-      }
-    }
-
-    if (popX + 270 > rect.width) popX = rect.width - 280;
-    if (popY + 220 > rect.height) popY = rect.height - 230;
-    if (popX < 10) popX = 10;
-    if (popY < 10) popY = 10;
-
-    dom.edgePopover.style.left = `${popX}px`;
-    dom.edgePopover.style.top = `${popY}px`;
-    dom.edgePopover.classList.add('active');
-  }
-
-  function hideEdgePopover() {
-    if (dom.edgePopover) {
-      dom.edgePopover.classList.remove('active');
-    }
-  }
-
-  // --- KEYBOARD SHORTCUTS ---
-  function handleKeyboardShortcuts(e) {
-    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
-
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      deleteSelected();
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
-      e.preventDefault();
-      redo();
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !window.getSelection().toString()) {
-      e.preventDefault();
-      copyMermaidCode();
-    }
-  }
-
-  // --- COPY & EXPORT ---
-  function copyMermaidCode() {
-    const code = generateMermaidCode();
-    navigator.clipboard.writeText(code).then(() => {
-      showToast('📋 ¡Código Mermaid copiado!');
-      if (dom.copyBtn) {
-        const orig = dom.copyBtn.innerHTML;
-        dom.copyBtn.innerHTML = '<span>✅ ¡Copiado!</span>';
-        setTimeout(() => dom.copyBtn.innerHTML = orig, 1800);
-      }
-    }).catch(err => {
-      showToast('Selecciona el código manualmente.');
-    });
-  }
-
-  function exportMmd() {
-    const code = generateMermaidCode();
-    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `diagrama_mermaid_${Date.now().toString(36)}.mmd`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('💾 Archivo .mmd descargado');
-  }
-
-  function showToast(msg) {
-    if (!dom.toastContainer) return;
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = msg;
-    dom.toastContainer.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s';
-      setTimeout(() => toast.remove(), 300);
-    }, 2200);
+  function updateCode() {
+    if (dom.codeArea) dom.codeArea.value = generateCode();
   }
 
   function updateStats() {
-    if (dom.nodeCount) dom.nodeCount.textContent = `${state.nodes.length} nodos`;
-    if (dom.edgeCount) dom.edgeCount.textContent = `${state.edges.length} conexiones`;
+    if (dom.statNodes) dom.statNodes.textContent = `${state.nodes.length} nodos`;
+    if (dom.statEdges) dom.statEdges.textContent = `${state.edges.length} conexiones`;
   }
 
-  // --- TEMPLATES ---
-  function loadTemplate(templateKey) {
-    const templates = {
+  // ── Mermaid SVG Rendering ──
+  let renderPromise = null;
+
+  async function renderDiagram() {
+    if (typeof mermaid === 'undefined') return;
+    const code = generateCode();
+    updateCode();
+    updateStats();
+
+    renderCounter++;
+    const id = `mf_${renderCounter}`;
+
+    try {
+      const { svg } = await mermaid.render(id, code);
+      dom.container.innerHTML = svg;
+      attachSvgHandlers();
+      applySelection();
+    } catch (err) {
+      console.warn('Mermaid render error:', err);
+      dom.container.innerHTML = `<div class="empty-state"><h2>Diagrama actualizándose...</h2><p>Agrega nodos para continuar.</p></div>`;
+    }
+  }
+
+  // ── SVG Interaction Handlers ──
+  function attachSvgHandlers() {
+    const svg = dom.container.querySelector('svg');
+    if (!svg) return;
+
+    // Nodes
+    const nodeEls = svg.querySelectorAll('.node');
+    nodeEls.forEach(nodeEl => {
+      const nodeId = extractNodeId(nodeEl);
+      if (!nodeId) return;
+
+      nodeEl.style.cursor = 'pointer';
+
+      nodeEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.connectFromId) {
+          finishConnect(nodeId);
+        } else {
+          selectNode(nodeId);
+        }
+      });
+
+      nodeEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        startInlineEdit(nodeId, nodeEl);
+      });
+    });
+
+    // Edges (paths) — use index mapping
+    const edgePaths = svg.querySelectorAll('.edgePath');
+    edgePaths.forEach((epEl, idx) => {
+      if (idx >= state.edges.length) return;
+      const pathEl = epEl.querySelector('path');
+      if (pathEl) {
+        pathEl.style.cursor = 'pointer';
+        // Add invisible fat hit area
+        const hit = pathEl.cloneNode();
+        hit.setAttribute('stroke', 'transparent');
+        hit.setAttribute('stroke-width', '20');
+        hit.style.pointerEvents = 'stroke';
+        hit.style.cursor = 'pointer';
+        hit.style.fill = 'none';
+        epEl.insertBefore(hit, pathEl);
+
+        const handler = (e) => {
+          e.stopPropagation();
+          selectEdge(idx, e);
+        };
+        hit.addEventListener('click', handler);
+        pathEl.addEventListener('click', handler);
+      }
+    });
+
+    // Edge Labels
+    const edgeLabels = svg.querySelectorAll('.edgeLabel');
+    edgeLabels.forEach((elEl, idx) => {
+      if (idx >= state.edges.length) return;
+      elEl.style.cursor = 'pointer';
+      elEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectEdge(idx, e);
+      });
+    });
+
+    // Click on background → deselect
+    svg.addEventListener('click', (e) => {
+      if (e.target === svg || e.target.closest('.node') === null && e.target.closest('.edgePath') === null && e.target.closest('.edgeLabel') === null) {
+        deselect();
+        cancelConnect();
+      }
+    });
+  }
+
+  function extractNodeId(svgNode) {
+    const id = svgNode.id || '';
+    const m = id.match(/^flowchart-(.+)-\d+$/);
+    return m ? m[1] : null;
+  }
+
+  function findSvgNode(nodeId) {
+    const svg = dom.container.querySelector('svg');
+    if (!svg) return null;
+    const nodes = svg.querySelectorAll('.node');
+    for (const n of nodes) {
+      if (extractNodeId(n) === nodeId) return n;
+    }
+    return null;
+  }
+
+  // ── Selection ──
+  function selectNode(nodeId) {
+    const node = state.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    state.selectedNodeId = nodeId;
+    state.selectedEdgeIdx = null;
+    hideEdgePopover();
+    applySelection();
+    showActionBar(node);
+  }
+
+  function selectEdge(idx, evt) {
+    if (idx < 0 || idx >= state.edges.length) return;
+    state.selectedEdgeIdx = idx;
+    state.selectedNodeId = null;
+    hideActionBar();
+    applySelection();
+    showEdgePopover(idx, evt);
+  }
+
+  function deselect() {
+    state.selectedNodeId = null;
+    state.selectedEdgeIdx = null;
+    hideActionBar();
+    hideEdgePopover();
+    hideInlineEditor();
+    applySelection();
+  }
+
+  function applySelection() {
+    const svg = dom.container.querySelector('svg');
+    if (!svg) return;
+
+    // Clear all selections
+    svg.querySelectorAll('.mf-selected').forEach(el => el.classList.remove('mf-selected'));
+
+    // Highlight selected node
+    if (state.selectedNodeId) {
+      const nodeEl = findSvgNode(state.selectedNodeId);
+      if (nodeEl) nodeEl.classList.add('mf-selected');
+    }
+
+    // Highlight selected edge
+    if (state.selectedEdgeIdx !== null) {
+      const edgePaths = svg.querySelectorAll('.edgePath');
+      if (edgePaths[state.selectedEdgeIdx]) {
+        edgePaths[state.selectedEdgeIdx].classList.add('mf-selected');
+      }
+    }
+  }
+
+  // ── Node Action Bar ──
+  function showActionBar(node) {
+    const svgNode = findSvgNode(node.id);
+    if (!svgNode) return;
+
+    // Build contextual buttons
+    let html = '';
+    html += `<button class="nab-btn nab-edit" data-act="edit">✏️ Editar</button>`;
+    html += `<button class="nab-btn nab-connect" data-act="connect">🔗 Conectar</button>`;
+
+    if (node.type === 'decision') {
+      html += `<button class="nab-btn nab-yes" data-act="yes">✔ +Sí</button>`;
+      html += `<button class="nab-btn nab-no" data-act="no">✖ +No</button>`;
+    } else {
+      html += `<button class="nab-btn nab-next" data-act="next">➕ +Siguiente</button>`;
+    }
+
+    html += `<button class="nab-btn nab-del" data-act="delete">🗑️</button>`;
+
+    dom.actionBar.innerHTML = html;
+    dom.actionBar.classList.add('visible');
+
+    // Position above the node
+    const nodeRect = svgNode.getBoundingClientRect();
+    const wsRect = dom.workspace.getBoundingClientRect();
+    let x = nodeRect.left + nodeRect.width / 2 - wsRect.left;
+    let y = nodeRect.top - wsRect.top - 8;
+
+    // Get action bar width after rendering
+    const barW = dom.actionBar.offsetWidth;
+    x -= barW / 2;
+    if (x < 4) x = 4;
+    if (x + barW > wsRect.width - 4) x = wsRect.width - barW - 4;
+    if (y < 4) y = nodeRect.bottom - wsRect.top + 8;
+
+    dom.actionBar.style.left = x + 'px';
+    dom.actionBar.style.top = y + 'px';
+
+    // Wire action buttons
+    dom.actionBar.querySelectorAll('.nab-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleNodeAction(node.id, btn.dataset.act);
+      });
+    });
+  }
+
+  function hideActionBar() {
+    dom.actionBar.classList.remove('visible');
+  }
+
+  function handleNodeAction(nodeId, action) {
+    switch (action) {
+      case 'edit':
+        const svgNode = findSvgNode(nodeId);
+        if (svgNode) startInlineEdit(nodeId, svgNode);
+        break;
+      case 'connect':
+        startConnect(nodeId);
+        break;
+      case 'yes':
+        quickAddBranch(nodeId, 'Sí');
+        break;
+      case 'no':
+        quickAddBranch(nodeId, 'No');
+        break;
+      case 'next':
+        quickAddBranch(nodeId, '');
+        break;
+      case 'delete':
+        deleteNode(nodeId);
+        break;
+    }
+  }
+
+  // ── Connect Mode ──
+  function startConnect(fromId) {
+    state.connectFromId = fromId;
+    dom.workspace.classList.add('connect-mode');
+    dom.connectBanner.classList.add('visible');
+    hideActionBar();
+    toast('🔗 Clic en el nodo destino para conectar');
+  }
+
+  function finishConnect(toId) {
+    if (state.connectFromId && state.connectFromId !== toId) {
+      const fromNode = state.nodes.find(n => n.id === state.connectFromId);
+      addEdge(state.connectFromId, toId);
+
+      // If from a decision, auto-show edge popover
+      if (fromNode && fromNode.type === 'decision') {
+        const edgeIdx = state.edges.length - 1;
+        setTimeout(() => selectEdge(edgeIdx, null), 100);
+      }
+    }
+    cancelConnect();
+  }
+
+  function cancelConnect() {
+    state.connectFromId = null;
+    dom.workspace.classList.remove('connect-mode');
+    dom.connectBanner.classList.remove('visible');
+  }
+
+  // ── Inline Text Editing ──
+  function startInlineEdit(nodeId, svgNode) {
+    const node = state.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    hideActionBar();
+
+    const nodeRect = svgNode.getBoundingClientRect();
+    const wsRect = dom.workspace.getBoundingClientRect();
+
+    const editor = dom.inlineEditor;
+    editor.value = node.label;
+    editor.style.display = 'block';
+    editor.style.left = (nodeRect.left - wsRect.left) + 'px';
+    editor.style.top = (nodeRect.top - wsRect.top) + 'px';
+    editor.style.width = Math.max(nodeRect.width + 20, 120) + 'px';
+    editor.style.height = nodeRect.height + 'px';
+    editor.focus();
+    editor.select();
+
+    const finish = () => {
+      const newLabel = editor.value.trim();
+      hideInlineEditor();
+      if (newLabel && newLabel !== node.label) {
+        updateNodeLabel(nodeId, newLabel);
+      } else {
+        selectNode(nodeId);
+      }
+    };
+
+    // Remove old listeners to avoid duplicates
+    const newEditor = editor.cloneNode(true);
+    editor.parentNode.replaceChild(newEditor, editor);
+    dom.inlineEditor = newEditor;
+
+    newEditor.value = node.label;
+    newEditor.style.display = 'block';
+    newEditor.style.left = (nodeRect.left - wsRect.left) + 'px';
+    newEditor.style.top = (nodeRect.top - wsRect.top) + 'px';
+    newEditor.style.width = Math.max(nodeRect.width + 20, 120) + 'px';
+    newEditor.style.height = nodeRect.height + 'px';
+    newEditor.focus();
+    newEditor.select();
+
+    newEditor.addEventListener('blur', finish);
+    newEditor.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); newEditor.blur(); }
+      if (e.key === 'Escape') { newEditor.value = node.label; newEditor.blur(); }
+    });
+  }
+
+  function hideInlineEditor() {
+    dom.inlineEditor.style.display = 'none';
+  }
+
+  // ── Edge Popover ──
+  function showEdgePopover(idx, evt) {
+    const edge = state.edges[idx];
+    if (!edge) return;
+
+    dom.edgeLabelIn.value = edge.label || '';
+    dom.edgeStyleSel.value = edge.style || 'normal';
+
+    const wsRect = dom.workspace.getBoundingClientRect();
+    let x, y;
+
+    if (evt) {
+      x = evt.clientX - wsRect.left + 12;
+      y = evt.clientY - wsRect.top - 10;
+    } else {
+      // Fallback: center of workspace
+      x = wsRect.width / 2 - 125;
+      y = wsRect.height / 2 - 80;
+    }
+
+    if (x + 260 > wsRect.width) x = wsRect.width - 270;
+    if (y + 200 > wsRect.height) y = wsRect.height - 210;
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
+
+    dom.edgePopover.style.left = x + 'px';
+    dom.edgePopover.style.top = y + 'px';
+    dom.edgePopover.classList.add('visible');
+  }
+
+  function hideEdgePopover() {
+    dom.edgePopover.classList.remove('visible');
+  }
+
+  // ── Event Wiring ──
+  function wireEvents() {
+    // Palette
+    document.querySelectorAll('.palette-card').forEach(card => {
+      card.addEventListener('click', () => addNode(card.dataset.type));
+    });
+
+    // Header buttons
+    dom.btnCopy.addEventListener('click', copyCode);
+    dom.btnClear.addEventListener('click', () => {
+      if (confirm('¿Limpiar todo el diagrama?')) {
+        state.nodes = []; state.edges = [];
+        deselect(); pushHistory(); renderDiagram();
+        toast('Lienzo limpio');
+      }
+    });
+    dom.btnTheme.addEventListener('click', toggleTheme);
+    dom.btnDownload.addEventListener('click', downloadMmd);
+
+    dom.dirSelect.addEventListener('change', (e) => {
+      state.direction = e.target.value;
+      pushHistory();
+      renderDiagram();
+    });
+
+    dom.tplSelect.addEventListener('change', (e) => {
+      if (e.target.value) {
+        loadTemplate(e.target.value);
+        e.target.value = '';
+      }
+    });
+
+    // Zoom
+    dom.zoomIn.addEventListener('click', () => setZoom(state.zoom + 0.15));
+    dom.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.15));
+    dom.zoomFit.addEventListener('click', () => setZoom(1));
+
+    dom.scroll.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        setZoom(state.zoom + (e.deltaY < 0 ? 0.1 : -0.1));
+      }
+    }, { passive: false });
+
+    // Edge Popover controls
+    dom.edgePopover.querySelectorAll('.cpill').forEach(pill => {
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state.selectedEdgeIdx !== null) {
+          const val = pill.dataset.val;
+          updateEdgeLabel(state.selectedEdgeIdx, val);
+          dom.edgeLabelIn.value = val;
+          toast(val ? `Condición: ${val}` : 'Condición eliminada');
+        }
+      });
+    });
+
+    dom.edgeLabelIn.addEventListener('input', () => {
+      if (state.selectedEdgeIdx !== null) {
+        state.edges[state.selectedEdgeIdx].label = dom.edgeLabelIn.value;
+        pushHistory();
+        renderDiagram();
+      }
+    });
+    // Prevent clicks inside input from bubbling
+    dom.edgeLabelIn.addEventListener('click', e => e.stopPropagation());
+
+    dom.edgeStyleSel.addEventListener('change', () => {
+      if (state.selectedEdgeIdx !== null) {
+        updateEdgeStyle(state.selectedEdgeIdx, dom.edgeStyleSel.value);
+      }
+    });
+    dom.edgeStyleSel.addEventListener('click', e => e.stopPropagation());
+
+    dom.btnDelEdge.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.selectedEdgeIdx !== null) {
+        deleteEdge(state.selectedEdgeIdx);
+        toast('Flecha eliminada');
+      }
+    });
+
+    // Cancel connect
+    dom.cancelConnect.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cancelConnect();
+    });
+
+    // Click on workspace background → deselect
+    dom.workspace.addEventListener('click', (e) => {
+      if (e.target === dom.workspace || e.target === dom.scroll || e.target === dom.container) {
+        deselect();
+        cancelConnect();
+      }
+    });
+
+    // Prevent popover clicks from deselecting
+    dom.edgePopover.addEventListener('click', e => e.stopPropagation());
+    dom.actionBar.addEventListener('click', e => e.stopPropagation());
+
+    // Keyboard
+    window.addEventListener('keydown', (e) => {
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (state.selectedNodeId) { deleteNode(state.selectedNodeId); toast('Nodo eliminado'); }
+        else if (state.selectedEdgeIdx !== null) { deleteEdge(state.selectedEdgeIdx); toast('Flecha eliminada'); }
+      }
+      if (e.key === 'Escape') { deselect(); cancelConnect(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !window.getSelection().toString()) { e.preventDefault(); copyCode(); }
+    });
+  }
+
+  // ── Zoom ──
+  function setZoom(val) {
+    state.zoom = Math.min(Math.max(val, 0.3), 2.5);
+    dom.container.style.transform = `scale(${state.zoom})`;
+    dom.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+  }
+
+  // ── Copy & Export ──
+  function copyCode() {
+    const code = generateCode();
+    navigator.clipboard.writeText(code).then(() => {
+      toast('📋 ¡Código copiado al portapapeles!');
+      const orig = dom.btnCopy.innerHTML;
+      dom.btnCopy.innerHTML = '✅ ¡Copiado!';
+      setTimeout(() => dom.btnCopy.innerHTML = orig, 1600);
+    }).catch(() => toast('Selecciona el código manualmente'));
+  }
+
+  function downloadMmd() {
+    const blob = new Blob([generateCode()], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `diagrama_${Date.now().toString(36)}.mmd`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('💾 Archivo .mmd descargado');
+  }
+
+  // ── Toast ──
+  function toast(msg) {
+    if (!dom.toasts) return;
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    dom.toasts.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2000);
+  }
+
+  // ── Templates ──
+  function loadTemplate(key) {
+    const T = {
       auth: {
         direction: 'TD',
         nodes: [
-          { id: 'Start', type: 'terminal', label: 'Inicio', x: 200, y: 50 },
-          { id: 'Input', type: 'io', label: 'Ingresar Credenciales', x: 200, y: 150 },
-          { id: 'CheckAuth', type: 'decision', label: '¿Credenciales Válidas?', x: 200, y: 260 },
-          { id: 'GenToken', type: 'process', label: 'Generar Token JWT', x: 80, y: 390 },
-          { id: 'ShowError', type: 'process', label: 'Mostrar Error 401', x: 330, y: 390 },
-          { id: 'End', type: 'terminal', label: 'Fin', x: 200, y: 510 }
+          { id: 'A', type: 'terminal', label: 'Inicio' },
+          { id: 'B', type: 'io', label: 'Ingresar Credenciales' },
+          { id: 'C', type: 'decision', label: '¿Credenciales Válidas?' },
+          { id: 'D', type: 'process', label: 'Generar Token JWT' },
+          { id: 'E', type: 'process', label: 'Mostrar Error 401' },
+          { id: 'F', type: 'terminal', label: 'Fin' }
         ],
         edges: [
-          { id: 'e1', from: 'Start', to: 'Input', style: 'normal' },
-          { id: 'e2', from: 'Input', to: 'CheckAuth', style: 'normal' },
-          { id: 'e3', from: 'CheckAuth', to: 'GenToken', label: 'Sí', style: 'thick' },
-          { id: 'e4', from: 'CheckAuth', to: 'ShowError', label: 'No', style: 'normal' },
-          { id: 'e5', from: 'GenToken', to: 'End', style: 'normal' },
-          { id: 'e6', from: 'ShowError', to: 'End', style: 'normal' }
+          { from: 'A', to: 'B', label: '', style: 'normal' },
+          { from: 'B', to: 'C', label: '', style: 'normal' },
+          { from: 'C', to: 'D', label: 'Sí', style: 'normal' },
+          { from: 'C', to: 'E', label: 'No', style: 'normal' },
+          { from: 'D', to: 'F', label: '', style: 'normal' },
+          { from: 'E', to: 'F', label: '', style: 'normal' }
         ]
       },
       payment: {
         direction: 'TD',
         nodes: [
-          { id: 'Checkout', type: 'terminal', label: 'Inicio Compra', x: 200, y: 50 },
-          { id: 'ValCard', type: 'decision', label: '¿Tarjeta Válida?', x: 200, y: 160 },
-          { id: 'Stripe', type: 'subroutine', label: 'Procesar con Stripe', x: 80, y: 290 },
-          { id: 'FailMsg', type: 'process', label: 'Rechazar Transacción', x: 340, y: 290 },
-          { id: 'SaveDB', type: 'database', label: 'Registrar Orden Pagada', x: 80, y: 410 },
-          { id: 'Done', type: 'terminal', label: 'Fin', x: 200, y: 530 }
+          { id: 'A', type: 'terminal', label: 'Checkout' },
+          { id: 'B', type: 'decision', label: '¿Tarjeta Válida?' },
+          { id: 'C', type: 'subroutine', label: 'Procesar con Stripe' },
+          { id: 'D', type: 'process', label: 'Rechazar Transacción' },
+          { id: 'E', type: 'database', label: 'Guardar Orden en DB' },
+          { id: 'F', type: 'terminal', label: 'Fin' }
         ],
         edges: [
-          { id: 'ep1', from: 'Checkout', to: 'ValCard', style: 'normal' },
-          { id: 'ep2', from: 'ValCard', to: 'Stripe', label: 'Sí', style: 'thick' },
-          { id: 'ep3', from: 'ValCard', to: 'FailMsg', label: 'No', style: 'normal' },
-          { id: 'ep4', from: 'Stripe', to: 'SaveDB', label: 'Aprobado', style: 'normal' },
-          { id: 'ep5', from: 'SaveDB', to: 'Done', style: 'normal' },
-          { id: 'ep6', from: 'FailMsg', to: 'Done', style: 'normal' }
+          { from: 'A', to: 'B', label: '', style: 'normal' },
+          { from: 'B', to: 'C', label: 'Sí', style: 'normal' },
+          { from: 'B', to: 'D', label: 'No', style: 'normal' },
+          { from: 'C', to: 'E', label: '', style: 'normal' },
+          { from: 'E', to: 'F', label: '', style: 'normal' },
+          { from: 'D', to: 'F', label: '', style: 'normal' }
         ]
       },
       etl: {
         direction: 'LR',
         nodes: [
-          { id: 'Src', type: 'database', label: 'Fuente CSV / API', x: 50, y: 150 },
-          { id: 'Extract', type: 'process', label: 'Extracción de Datos', x: 250, y: 150 },
-          { id: 'Validate', type: 'decision', label: '¿Schema Válido?', x: 450, y: 150 },
-          { id: 'Transform', type: 'process', label: 'Transformar & Normalizar', x: 680, y: 100 },
-          { id: 'DLQ', type: 'database', label: 'Dead Letter Queue', x: 680, y: 230 },
-          { id: 'Load', type: 'database', label: 'Data Warehouse (SQL)', x: 920, y: 100 }
+          { id: 'A', type: 'database', label: 'Fuente CSV / API' },
+          { id: 'B', type: 'process', label: 'Extracción' },
+          { id: 'C', type: 'decision', label: '¿Schema OK?' },
+          { id: 'D', type: 'process', label: 'Transformar' },
+          { id: 'E', type: 'database', label: 'Dead Letter Queue' },
+          { id: 'F', type: 'database', label: 'Data Warehouse' }
         ],
         edges: [
-          { id: 'ee1', from: 'Src', to: 'Extract', style: 'normal' },
-          { id: 'ee2', from: 'Extract', to: 'Validate', style: 'normal' },
-          { id: 'ee3', from: 'Validate', to: 'Transform', label: 'Sí', style: 'thick' },
-          { id: 'ee4', from: 'Validate', to: 'DLQ', label: 'No', style: 'dotted' },
-          { id: 'ee5', from: 'Transform', to: 'Load', style: 'normal' }
+          { from: 'A', to: 'B', label: '', style: 'normal' },
+          { from: 'B', to: 'C', label: '', style: 'normal' },
+          { from: 'C', to: 'D', label: 'Sí', style: 'normal' },
+          { from: 'C', to: 'E', label: 'No', style: 'dotted' },
+          { from: 'D', to: 'F', label: '', style: 'normal' }
         ]
+      },
+      empty: {
+        direction: 'TD',
+        nodes: [],
+        edges: []
       }
     };
 
-    const tpl = templates[templateKey];
+    const tpl = T[key];
     if (tpl) {
-      state.direction = tpl.direction;
-      if (dom.directionSelect) dom.directionSelect.value = tpl.direction;
       state.nodes = JSON.parse(JSON.stringify(tpl.nodes));
       state.edges = JSON.parse(JSON.stringify(tpl.edges));
-      state.selectedNodeId = null;
-      state.selectedEdgeId = null;
-      hideEdgePopover();
-      render();
-      saveState();
-      autoLayout(false);
-      showToast(`Plantilla cargada: ${templateKey.toUpperCase()}`);
+      state.direction = tpl.direction;
+      dom.dirSelect.value = state.direction;
+      deselect();
+      pushHistory();
+      renderDiagram();
+      if (key !== 'empty') toast(`Plantilla: ${key.toUpperCase()}`);
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  // ── Boot ──
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
