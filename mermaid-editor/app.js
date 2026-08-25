@@ -1,5 +1,5 @@
 /**
- * MermaidFlow Studio - Complete Interactive Visual Flowchart & Bidirectional Mermaid Parser
+ * MermaidFlow Studio - Ultra-Responsive, Collision-Free Bidirectional Flowchart Editor
  * High-Performance Vanilla JS + SVG Architecture
  */
 
@@ -25,7 +25,7 @@
     editingNodeId: null,
     activeColor: 'emerald',
     direction: 'TD',
-    pan: { x: 120, y: 100 },
+    pan: { x: 100, y: 90 },
     zoom: 1,
     isPanning: false,
     panStart: { x: 0, y: 0 },
@@ -86,12 +86,18 @@
   };
 
   let codeDebounceTimer = null;
+  let rafId = null;
 
   // --- INITIALIZATION ---
   function init() {
     loadTheme();
     setupEventListeners();
     setupDockButtons();
+
+    // Responsive check: if screen is narrow, collapse code panel by default
+    if (window.innerWidth <= 800) {
+      setCodePanel(false);
+    }
 
     if (!loadFromStorage()) {
       loadTemplate('auth');
@@ -317,7 +323,7 @@
     }
   }
 
-  // --- BIDIRECTIONAL PARSER (Mermaid Code -> Visual Graph) ---
+  // --- ROBUST BIDIRECTIONAL PARSER (Verified regex engine) ---
   function parseAndApplyMermaidCode(code, triggerToast = true) {
     if (!code || !code.trim()) return false;
 
@@ -327,148 +333,122 @@
       const nodesMap = new Map();
       const newEdges = [];
 
-      // Helper to register / extract node
-      function ensureNode(id, shape = 'process', label = null) {
-        if (!id) return;
-        id = id.trim();
-        if (!id) return;
-        
-        // Clean ID (remove spaces or punctuation)
-        const cleanId = id.replace(/["']/g, '');
+      function cleanStr(s) {
+        if (!s) return '';
+        return s.trim().replace(/^["']|["']$/g, '').replace(/<br\s*[\/]?>/gi, '\n').trim();
+      }
 
-        if (!nodesMap.has(cleanId)) {
-          let nodeColor = 'sky';
-          if (shape === 'terminal') nodeColor = 'emerald';
-          else if (shape === 'decision') nodeColor = 'amber';
-          else if (shape === 'database') nodeColor = 'purple';
-          else if (shape === 'io') nodeColor = 'cyan';
-          else if (shape === 'subroutine') nodeColor = 'purple';
-
-          // Check if node already existed in previous state to preserve coordinates
-          const existing = state.nodes.find(n => n.id === cleanId);
-
-          nodesMap.set(cleanId, {
-            id: cleanId,
-            shape: shape,
-            color: existing ? existing.color : nodeColor,
-            label: label !== null ? cleanLabel(label) : (existing ? existing.label : cleanId),
-            x: existing ? existing.x : 0,
-            y: existing ? existing.y : 0,
-            width: shape === 'decision' ? 150 : 140,
-            height: shape === 'decision' ? 60 : 52
-          });
-        } else {
-          const n = nodesMap.get(cleanId);
-          if (label !== null) n.label = cleanLabel(label);
-          if (shape !== 'process') n.shape = shape;
+      // Step 1: Detect Direction
+      for (let rawLine of lines) {
+        let line = rawLine.trim();
+        const dirMatch = line.match(/^(?:flowchart|graph)\s+(TD|TB|LR|BT|RL)/i);
+        if (dirMatch) {
+          const d = dirMatch[1].toUpperCase();
+          detectedDir = (d === 'TB') ? 'TD' : d;
+          break;
         }
       }
 
-      function cleanLabel(str) {
-        return str
-          .replace(/^["']|["']$/g, '')
-          .replace(/<br\s*[\/]?>/gi, '\n')
-          .trim();
-      }
+      // Node shape pattern regex: [[...]], ([...]), [(...)], [/...\], {...}, [...]
+      const nodeShapeRegex = /([a-zA-Z0-9_]+)\s*(?:(\[\[(.*?)\]\])|(\(\[(.*?)\]\))|(\[\((.*?)\)\])|(\[\/(.*?)\/\])|(\[\\(.*?)\\\])|(\{(.*?)\})|(\[(.*?)\]))/g;
 
-      // 1. Process line by line
       for (let rawLine of lines) {
         let line = rawLine.trim();
         if (!line || line.startsWith('%%') || line.startsWith('subgraph') || line === 'end' || line.startsWith('classDef') || line.startsWith('class ') || line.startsWith('style ')) {
           continue;
         }
+        if (/^(?:flowchart|graph)\s+/i.test(line)) continue;
 
-        // Detect flowchart / graph direction
-        const dirMatch = line.match(/^(?:flowchart|graph)\s+(TD|TB|LR|BT|RL)/i);
-        if (dirMatch) {
-          const d = dirMatch[1].toUpperCase();
-          detectedDir = (d === 'TB') ? 'TD' : d;
-          continue;
-        }
-
-        // Extract full node definitions like: A([Inicio]) or B{"¿Es válido?"}
-        // Shapes in order of pattern specificity:
-        // Subroutine: [[...]]
-        // Terminal: ([...])
-        // Database: [(...)]
-        // IO: [/.../] or [\...\]
-        // Decision: {...}
-        // Process: [...]
-        const shapeRegex = /([a-zA-Z0-9_]+)\s*(?:(\[\[(.*?)\]\])|(\(\[(.*?)\]\))|(\[\((.*?)\)\])|(\[\/(.*?)\/\])|(\[\\(.*?)\\\])|(\{(.*?)\})|(\[(.*?)\]))/g;
+        // Extract shapes on this line
         let match;
-        while ((match = shapeRegex.exec(line)) !== null) {
-          const id = match[1];
+        nodeShapeRegex.lastIndex = 0;
+        while ((match = nodeShapeRegex.exec(line)) !== null) {
+          const nid = match[1];
           let shape = 'process';
-          let label = id;
+          let lbl = nid;
 
-          if (match[2] !== undefined) { shape = 'subroutine'; label = match[3]; }
-          else if (match[4] !== undefined) { shape = 'terminal'; label = match[5]; }
-          else if (match[6] !== undefined) { shape = 'database'; label = match[7]; }
-          else if (match[8] !== undefined) { shape = 'io'; label = match[9]; }
-          else if (match[10] !== undefined) { shape = 'io'; label = match[11]; }
-          else if (match[12] !== undefined) { shape = 'decision'; label = match[13]; }
-          else if (match[14] !== undefined) { shape = 'process'; label = match[15]; }
+          if (match[2] !== undefined) { shape = 'subroutine'; lbl = match[3]; }
+          else if (match[4] !== undefined) { shape = 'terminal'; lbl = match[5]; }
+          else if (match[6] !== undefined) { shape = 'database'; lbl = match[7]; }
+          else if (match[8] !== undefined) { shape = 'io'; lbl = match[9]; }
+          else if (match[10] !== undefined) { shape = 'io'; lbl = match[11]; }
+          else if (match[12] !== undefined) { shape = 'decision'; lbl = match[13]; }
+          else if (match[14] !== undefined) { shape = 'process'; lbl = match[15]; }
 
-          ensureNode(id, shape, label);
+          lbl = cleanStr(lbl);
+          if (!nodesMap.has(nid)) {
+            let nodeColor = 'sky';
+            if (shape === 'terminal') nodeColor = 'emerald';
+            else if (shape === 'decision') nodeColor = 'amber';
+            else if (shape === 'database') nodeColor = 'purple';
+            else if (shape === 'io') nodeColor = 'cyan';
+            else if (shape === 'subroutine') nodeColor = 'purple';
+
+            const existing = state.nodes.find(n => n.id === nid);
+            nodesMap.set(nid, {
+              id: nid,
+              shape: shape,
+              color: existing ? existing.color : nodeColor,
+              label: lbl,
+              x: existing ? existing.x : 0,
+              y: existing ? existing.y : 0,
+              width: shape === 'decision' ? 150 : 140,
+              height: shape === 'decision' ? 60 : 52
+            });
+          } else {
+            const n = nodesMap.get(nid);
+            if (lbl) n.label = lbl;
+            if (shape !== 'process') n.shape = shape;
+          }
         }
 
-        // Extract connection syntax like: A --> B, A -- Sí --> B, A -->|Sí| B, A ==> B, A -.-> B
-        // Split line by connectors while capturing connector type & label
-        const connRegex = /(-->|==>|-\.->|---|--\s*["']?(.*?)["']?\s*-->|==\s*["']?(.*?)["']?\s*==>|-\.\s*["']?(.*?)["']?\s*\.->|-->\|(.*?)\||==>\|(.*?)\|/g;
+        // Normalize line by stripping inline shapes to parse connectors
+        const normalized = line.replace(nodeShapeRegex, '$1');
 
-        // Check if line contains connections
-        if (connRegex.test(line)) {
-          // Re-scan connection segments
-          const segments = line.split(/\s*(?:-->|==>|-\.->|---|--.*?-->|==.*?==>|-\..*?\.->|-->\|.*?\||==>\|.*?\|)\s*/);
-          const connectors = [...line.matchAll(/(-->|==>|-\.->|---|--\s*(?:["']?(.*?)["']?)\s*-->|==\s*(?:["']?(.*?)["']?)\s*==>|-\.\s*(?:["']?(.*?)["']?)\s*\.->|-->\|(.*?)\||==>\|(.*?)\|)/g)];
+        // Regex for connections
+        const connFinder = /([a-zA-Z0-9_]+)\s*(?:(-->|==>|-\.->|---|--\s*["']?(.*?)["']?\s*-->|==\s*["']?(.*?)["']?\s*==>|-\.\s*["']?(.*?)["']?\s*\.->|-->\|(.*?)\||\=\=>\|(.*?)\||\-\.->\|(.*?)\|))\s*([a-zA-Z0-9_]+)/g;
 
-          if (segments.length >= 2 && connectors.length >= 1) {
-            for (let i = 0; i < connectors.length; i++) {
-              const srcRaw = segments[i].trim();
-              const tgtRaw = segments[i + 1].trim();
-              const connMatch = connectors[i];
+        let cm;
+        while ((cm = connFinder.exec(normalized)) !== null) {
+          const src = cm[1];
+          const tgt = cm[9];
+          let style = 'normal';
+          let lbl = '';
+          const fullConn = cm[0];
 
-              // Clean IDs from shapes if attached
-              const srcId = srcRaw.replace(/[\[\(\{\/\\].*$/, '').trim();
-              const tgtId = tgtRaw.replace(/[\[\(\{\/\\].*$/, '').trim();
+          if (fullConn.includes('==>')) style = 'thick';
+          else if (fullConn.includes('-.->') || fullConn.includes('.-')) style = 'dotted';
+          else if (fullConn.includes('---')) style = 'open';
 
-              if (srcId && tgtId) {
-                ensureNode(srcId);
-                ensureNode(tgtId);
-
-                let style = 'normal';
-                let edgeLabel = '';
-
-                const fullConn = connMatch[0];
-                if (fullConn.includes('==>')) style = 'thick';
-                else if (fullConn.includes('-.->') || fullConn.includes('.-')) style = 'dotted';
-                else if (fullConn.includes('---')) style = 'open';
-
-                // Extract label
-                if (connMatch[2]) edgeLabel = connMatch[2];
-                else if (connMatch[3]) edgeLabel = connMatch[3];
-                else if (connMatch[4]) edgeLabel = connMatch[4];
-                else if (connMatch[5]) edgeLabel = connMatch[5];
-                else if (connMatch[6]) edgeLabel = connMatch[6];
-
-                newEdges.push({
-                  id: `edge_${srcId}_${tgtId}_${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 4)}`,
-                  from: srcId,
-                  to: tgtId,
-                  fromPort: 'bottom',
-                  toPort: 'top',
-                  label: cleanLabel(edgeLabel),
-                  style: style
-                });
-              }
+          for (let idx of [3, 4, 5, 6, 7, 8]) {
+            if (cm[idx]) {
+              lbl = cleanStr(cm[idx]);
+              break;
             }
           }
+
+          // Register node if not yet seen
+          if (!nodesMap.has(src)) {
+            nodesMap.set(src, { id: src, shape: 'process', color: 'sky', label: src, x: 0, y: 0, width: 140, height: 52 });
+          }
+          if (!nodesMap.has(tgt)) {
+            nodesMap.set(tgt, { id: tgt, shape: 'process', color: 'sky', label: tgt, x: 0, y: 0, width: 140, height: 52 });
+          }
+
+          newEdges.push({
+            id: `edge_${src}_${tgt}_${Date.now().toString(36)}_${Math.random().toString(36).substr(2, 4)}`,
+            from: src,
+            to: tgt,
+            fromPort: 'bottom',
+            toPort: 'top',
+            label: lbl,
+            style: style
+          });
         }
       }
 
       if (nodesMap.size === 0) return false;
 
-      // Apply to state
       state.direction = detectedDir;
       if (dom.selectDirection) dom.selectDirection.value = detectedDir;
 
@@ -478,7 +458,7 @@
 
       render();
       autoLayout(true);
-      saveState(false); // Don't overwrite the user's textarea immediately
+      saveState(false);
 
       if (dom.syncStatus) {
         dom.syncStatus.textContent = '⚡ Sincronizado';
@@ -500,7 +480,7 @@
     }
   }
 
-  // --- SMART HIERARCHICAL AUTO-LAYOUT (Sugiyama Algorithm) ---
+  // --- SMART HIERARCHICAL AUTO-LAYOUT & COLLISION RESOLUTION ---
   function autoLayout(animate = true) {
     if (state.nodes.length === 0) return;
 
@@ -565,9 +545,9 @@
     });
 
     const layerSpacing = isHorizontal ? 260 : 130;
-    const nodeSpacing = isHorizontal ? 100 : 200;
+    const nodeSpacing = isHorizontal ? 100 : 210;
     const startX = 140;
-    const startY = 100;
+    const startY = 110; // Extra clearance for floating dock
 
     const targetPositions = {};
 
@@ -590,6 +570,34 @@
         }
       });
     });
+
+    // Collision Resolution Pass (AABB Separation)
+    const minGap = 20;
+    const nodeList = state.nodes.map(n => ({
+      id: n.id,
+      x: targetPositions[n.id] ? targetPositions[n.id].x : n.x,
+      y: targetPositions[n.id] ? targetPositions[n.id].y : n.y,
+      width: n.width || 140,
+      height: n.height || 52
+    }));
+
+    for (let i = 0; i < nodeList.length; i++) {
+      for (let j = i + 1; j < nodeList.length; j++) {
+        const n1 = nodeList[i];
+        const n2 = nodeList[j];
+        const overlapX = (n1.x < n2.x + n2.width + minGap) && (n1.x + n1.width + minGap > n2.x);
+        const overlapY = (n1.y < n2.y + n2.height + minGap) && (n1.y + n1.height + minGap > n2.y);
+        if (overlapX && overlapY) {
+          if (isHorizontal) {
+            n2.y = n1.y + n1.height + minGap;
+            if (targetPositions[n2.id]) targetPositions[n2.id].y = n2.y;
+          } else {
+            n2.x = n1.x + n1.width + minGap;
+            if (targetPositions[n2.id]) targetPositions[n2.id].x = n2.x;
+          }
+        }
+      }
+    }
 
     if (animate) {
       animateLayout(targetPositions);
@@ -1040,7 +1048,7 @@
     dom.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.15));
     dom.zoomReset.addEventListener('click', () => {
       state.zoom = 1;
-      state.pan = { x: 120, y: 100 };
+      state.pan = { x: 100, y: 90 };
       updateWorldTransform();
     });
 
