@@ -192,10 +192,54 @@ body {
   transform-origin: 0 0;
 }
 
+/* =========================================================
+   SUBGRAPHS (MODULE CONTAINERS) LAYER
+   ========================================================= */
+.subgraphs-layer {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 5;
+}
+
+.canvas-subgraph {
+  position: absolute;
+  background: rgba(30, 41, 59, 0.35);
+  border: 1.5px dashed rgba(56, 189, 248, 0.4);
+  border-radius: 16px;
+  padding: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(4px);
+  transition: border-color 0.15s, background 0.15s;
+  pointer-events: none;
+}
+.canvas-subgraph:hover {
+  border-color: #38bdf8;
+  background: rgba(30, 41, 59, 0.45);
+}
+
+.subgraph-header {
+  position: absolute; top: 12px; left: 16px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 800;
+  color: #38bdf8; letter-spacing: 0.3px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 3px 10px; border-radius: 8px;
+}
+
+[data-theme="light"] .canvas-subgraph {
+  background: rgba(241, 245, 249, 0.6);
+  border: 1.5px dashed rgba(2, 132, 199, 0.35);
+}
+[data-theme="light"] .subgraph-header {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(2, 132, 199, 0.3);
+  color: #0284c7;
+}
+
 /* SVG Canvas for Connectors */
 .svg-canvas {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  pointer-events: none; overflow: visible;
+  pointer-events: none; overflow: visible; z-index: 10;
 }
 
 /* Edges */
@@ -233,7 +277,7 @@ body {
 @keyframes dashAnimation { to { stroke-dashoffset: -20; } }
 
 /* Nodes Layer */
-.nodes-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.nodes-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 15; }
 
 /* =========================================================
    DYNAMIC SVG VECTOR FLOWCHART NODES
@@ -244,7 +288,7 @@ body {
   border: none;
   display: flex; align-items: center; justify-content: center;
   cursor: move;
-  z-index: 10;
+  z-index: 20;
 }
 .canvas-node:hover { filter: brightness(1.12); }
 
@@ -267,7 +311,7 @@ body {
 }
 
 /* Multi-Selected Nodes Highlight */
-.canvas-node.selected { z-index: 25; }
+.canvas-node.selected { z-index: 30; }
 .canvas-node.selected .shape-svg-fill {
   stroke: #38bdf8 !important;
   stroke-width: 3px !important;
@@ -314,7 +358,7 @@ body {
 .node-port {
   position: absolute; width: 14px; height: 14px;
   background: var(--bg-panel); border: 2px solid #64748b; border-radius: 50%;
-  cursor: crosshair; z-index: 20; opacity: 0.35; transition: all 0.15s;
+  cursor: crosshair; z-index: 25; opacity: 0.35; transition: all 0.15s;
 }
 .canvas-node:hover .node-port, .canvas-node.selected .node-port { opacity: 1; }
 .node-port:hover {

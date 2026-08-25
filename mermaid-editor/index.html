@@ -20,6 +20,7 @@
         <select id="select-template" class="dock-select-subtle" title="Cargar Plantilla">
           <option value="">📂 Plantillas...</option>
           <option value="auth">🔐 Autenticación JWT</option>
+          <option value="pin_system">🏛️ Sistema Modular PIN (Subgrafos)</option>
           <option value="payment">💳 Pasarela de Pago</option>
           <option value="etl">📊 Pipeline ETL</option>
           <option value="blank">⬜ Lienzo Limpio</option>
@@ -111,7 +112,7 @@
           <option value="RL">← RL</option>
         </select>
 
-        <button id="btn-auto-layout" class="btn-dock-accent" title="Auto-Organizar nodos">
+        <button id="btn-auto-layout" class="btn-dock-accent" title="Auto-Organizar nodos y subgrafos">
           <span>⚡ Organizar</span>
         </button>
       </div>
@@ -151,6 +152,9 @@
     <!-- CANVAS INTERACTIVO -->
     <main class="canvas-viewport" id="canvas-viewport">
       <div class="canvas-world" id="canvas-world">
+        <!-- Subgraphs Container Layer (Background Containers) -->
+        <div id="subgraphs-layer" class="subgraphs-layer"></div>
+
         <!-- SVG Connections Layer -->
         <svg id="svg-canvas" class="svg-canvas">
           <defs>

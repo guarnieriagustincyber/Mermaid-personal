@@ -1,5 +1,5 @@
 /**
- * MermaidFlow Studio - Ultra-Modern Frameless Canvas & Multi-Selection Engine
+ * MermaidFlow Studio - Ultra-Modern Frameless Canvas & Modular Subgraph Engine
  * High-Performance Vanilla JS + SVG Architecture
  */
 
@@ -33,7 +33,7 @@
 
     switch (shape) {
       case 'decision': {
-        const w = Math.max(150, Math.round(metrics.width * 1.5 + 36));
+        const w = Math.max(150, Math.round(metrics.width * 1.45 + 36));
         const h = Math.max(72, Math.round(metrics.lines * 22 + 42));
         return { width: w, height: h };
       }
@@ -138,19 +138,20 @@
   const state = {
     nodes: [],
     edges: [],
-    selectedNodeIds: new Set(), // Multi-selection support (Ctrl + Click)
+    subgraphs: [], // Array of { id, title }
+    selectedNodeIds: new Set(),
     selectedEdgeId: null,
     editingNodeId: null,
     activeColor: 'emerald',
     direction: 'TD',
     connStyle: 'curved',
-    pan: { x: 100, y: 90 },
-    zoom: 1,
+    pan: { x: 80, y: 90 },
+    zoom: 0.85,
     isPanning: false,
     panStart: { x: 0, y: 0 },
     isDraggingNodes: false,
     dragStartMouse: { x: 0, y: 0 },
-    dragInitialNodePos: new Map(), // nodeId -> { x, y }
+    dragInitialNodePos: new Map(),
     connectingFrom: null,
     connectModeFromId: null,
     history: [],
@@ -165,6 +166,7 @@
   const dom = {
     viewport: $('canvas-viewport'),
     world: $('canvas-world'),
+    subgraphsLayer: $('subgraphs-layer'),
     svgCanvas: $('svg-canvas'),
     edgesLayer: $('edges-layer'),
     tempLine: $('temp-connecting-line'),
@@ -226,14 +228,14 @@
     }
 
     if (!loadFromStorage()) {
-      loadTemplate('auth');
+      loadTemplate('pin_system');
     }
 
     updateWorldTransform();
     render();
     saveState();
 
-    setTimeout(() => autoLayout(false), 80);
+    setTimeout(() => autoLayout(false), 100);
   }
 
   // --- STATE PERSISTENCE & HISTORY ---
@@ -241,6 +243,7 @@
     const snapshot = JSON.stringify({
       nodes: state.nodes,
       edges: state.edges,
+      subgraphs: state.subgraphs,
       direction: state.direction,
       connStyle: state.connStyle
     });
@@ -282,6 +285,7 @@
       const data = JSON.parse(jsonStr);
       state.nodes = data.nodes || [];
       state.edges = data.edges || [];
+      state.subgraphs = data.subgraphs || [];
       state.direction = data.direction || 'TD';
       state.connStyle = data.connStyle || 'curved';
       if (dom.selectDirection) dom.selectDirection.value = state.direction;
@@ -306,6 +310,7 @@
         if (data.nodes && data.nodes.length > 0) {
           state.nodes = data.nodes;
           state.edges = data.edges || [];
+          state.subgraphs = data.subgraphs || [];
           state.direction = data.direction || 'TD';
           state.connStyle = data.connStyle || 'curved';
           if (dom.selectDirection) dom.selectDirection.value = state.direction;
@@ -441,6 +446,7 @@
 
     const nextText = conditionLabel === 'Sí' ? 'Acción Sí' : (conditionLabel === 'No' ? 'Acción No' : 'Siguiente Paso');
     const newNode = createNode('process', newX, newY, nextText, fromNode.color);
+    if (fromNode.subgraph) newNode.subgraph = fromNode.subgraph;
     createEdge(fromNode.id, newNode.id, 'bottom', 'top', conditionLabel, 'normal');
 
     autoLayout(true);
@@ -470,13 +476,15 @@
     }
   }
 
-  // --- ROBUST BIDIRECTIONAL PARSER ---
+  // --- ROBUST BIDIRECTIONAL PARSER WITH SUBGRAPH SUPPORT ---
   function parseAndApplyMermaidCode(code, triggerToast = true) {
     if (!code || !code.trim()) return false;
 
     try {
       const lines = code.split('\n');
       let detectedDir = state.direction;
+      const subgraphsMap = new Map();
+      let currentSg = null;
       const nodesMap = new Map();
       const newEdges = [];
 
@@ -496,14 +504,31 @@
       }
 
       const nodeShapeRegex = /([a-zA-Z0-9_]+)\s*(?:(\[\[(.*?)\]\])|(\(\[(.*?)\]\))|(\[\((.*?)\)\])|(\[\/(.*?)\/\])|(\[\\(.*?)\\\])|(\{(.*?)\})|(\[(.*?)\]))/g;
+      const connFinder = /([a-zA-Z0-9_]+)\s*(?:(-->|==>|-\.->|---|--\s*["']?(.*?)["']?\s*-->|==\s*["']?(.*?)["']?\s*==>|-\.\s*["']?(.*?)["']?\s*\.->|-->\s*\|(.*?)\||\=\=>\s*\|(.*?)\||\-\.->\s*\|(.*?)\|))\s*([a-zA-Z0-9_]+)/g;
 
       for (let rawLine of lines) {
         let line = rawLine.trim();
-        if (!line || line.startsWith('%%') || line.startsWith('subgraph') || line === 'end' || line.startsWith('classDef') || line.startsWith('class ') || line.startsWith('style ')) {
+        if (!line || line.startsWith('%%') || line.startsWith('style ') || line.startsWith('classDef') || line.startsWith('class ')) {
           continue;
         }
         if (/^(?:flowchart|graph)\s+/i.test(line)) continue;
 
+        // Subgraph begin
+        const sgMatch = line.match(/^subgraph\s+([a-zA-Z0-9_]+)(?:\s*\["?(.*?)"?\])?/i);
+        if (sgMatch) {
+          currentSg = sgMatch[1];
+          const sgTitle = cleanStr(sgMatch[2]) || currentSg;
+          subgraphsMap.set(currentSg, { id: currentSg, title: sgTitle });
+          continue;
+        }
+
+        // Subgraph end
+        if (line.toLowerCase() === 'end') {
+          currentSg = null;
+          continue;
+        }
+
+        // Parse node shapes
         let match;
         nodeShapeRegex.lastIndex = 0;
         while ((match = nodeShapeRegex.exec(line)) !== null) {
@@ -536,6 +561,7 @@
               shape: shape,
               color: existing ? existing.color : nodeColor,
               label: lbl,
+              subgraph: currentSg,
               x: existing ? existing.x : 0,
               y: existing ? existing.y : 0,
               width: dims.width,
@@ -549,13 +575,14 @@
               n.width = dims.width;
               n.height = dims.height;
             }
+            if (currentSg) n.subgraph = currentSg;
           }
         }
 
+        // Parse connections
         const normalized = line.replace(nodeShapeRegex, '$1');
-        const connFinder = /([a-zA-Z0-9_]+)\s*(?:(-->|==>|-\.->|---|--\s*["']?(.*?)["']?\s*-->|==\s*["']?(.*?)["']?\s*==>|-\.\s*["']?(.*?)["']?\s*\.->|-->\|(.*?)\||\=\=>\|(.*?)\||\-\.->\|(.*?)\|))\s*([a-zA-Z0-9_]+)/g;
-
         let cm;
+        connFinder.lastIndex = 0;
         while ((cm = connFinder.exec(normalized)) !== null) {
           const src = cm[1];
           const tgt = cm[9];
@@ -576,11 +603,11 @@
 
           if (!nodesMap.has(src)) {
             const sDims = computeNodeDimensions('process', src);
-            nodesMap.set(src, { id: src, shape: 'process', color: 'sky', label: src, x: 0, y: 0, width: sDims.width, height: sDims.height });
+            nodesMap.set(src, { id: src, shape: 'process', color: 'sky', label: src, subgraph: currentSg, x: 0, y: 0, width: sDims.width, height: sDims.height });
           }
           if (!nodesMap.has(tgt)) {
             const tDims = computeNodeDimensions('process', tgt);
-            nodesMap.set(tgt, { id: tgt, shape: 'process', color: 'sky', label: tgt, x: 0, y: 0, width: tDims.width, height: tDims.height });
+            nodesMap.set(tgt, { id: tgt, shape: 'process', color: 'sky', label: tgt, subgraph: currentSg, x: 0, y: 0, width: tDims.width, height: tDims.height });
           }
 
           newEdges.push({
@@ -600,6 +627,7 @@
       state.direction = detectedDir;
       if (dom.selectDirection) dom.selectDirection.value = detectedDir;
 
+      state.subgraphs = Array.from(subgraphsMap.values());
       state.nodes = Array.from(nodesMap.values());
       state.edges = newEdges;
 
@@ -627,123 +655,256 @@
     }
   }
 
-  // --- SMART AUTO-LAYOUT & COLLISION RESOLUTION ---
+  // --- SMART AUTO-LAYOUT WITH SUBGRAPH & CYCLE RESOLUTION ---
   function autoLayout(animate = true) {
     if (state.nodes.length === 0) return;
 
-    const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
-    const isReversed = state.direction === 'BT' || state.direction === 'RL';
-
-    const inDegree = {};
-    const adj = {};
-    state.nodes.forEach(n => {
-      inDegree[n.id] = 0;
-      adj[n.id] = [];
-    });
-
-    state.edges.forEach(e => {
-      if (adj[e.from] && inDegree[e.to] !== undefined) {
-        adj[e.from].push(e.to);
-        inDegree[e.to] = (inDegree[e.to] || 0) + 1;
-      }
-    });
-
-    const ranks = {};
-    const queue = [];
-
-    state.nodes.forEach(n => {
-      if (inDegree[n.id] === 0) {
-        ranks[n.id] = 0;
-        queue.push(n.id);
-      }
-    });
-
-    if (queue.length === 0 && state.nodes.length > 0) {
-      ranks[state.nodes[0].id] = 0;
-      queue.push(state.nodes[0].id);
-    }
-
-    let maxRank = 0;
-    const visited = new Set();
-    while (queue.length > 0) {
-      const u = queue.shift();
-      visited.add(u);
-      const currentRank = ranks[u] || 0;
-
-      (adj[u] || []).forEach(v => {
-        const nextRank = currentRank + 1;
-        if (ranks[v] === undefined || nextRank > ranks[v]) {
-          ranks[v] = nextRank;
-          if (nextRank > maxRank) maxRank = nextRank;
-        }
-        if (!visited.has(v)) queue.push(v);
-      });
-    }
-
-    state.nodes.forEach(n => {
-      if (ranks[n.id] === undefined) ranks[n.id] = 0;
-    });
-
-    const layers = [];
-    for (let r = 0; r <= maxRank; r++) layers[r] = [];
-    state.nodes.forEach(n => {
-      const r = ranks[n.id] || 0;
-      layers[r].push(n);
-    });
-
-    const layerSpacing = isHorizontal ? 280 : 160;
-    const nodeSpacing = isHorizontal ? 130 : 250;
-    const startX = 140;
-    const startY = 110;
-
     const targetPositions = {};
 
-    layers.forEach((layerNodes, r) => {
-      const layerIndex = isReversed ? (layers.length - 1 - r) : r;
-      const totalSpan = (layerNodes.length - 1) * nodeSpacing;
+    if (state.subgraphs.length > 0) {
+      // 1. Modular Subgraph Layout
+      const sgMap = new Map(state.subgraphs.map(s => [s.id, s]));
+      const sgNodes = new Map();
+      const standaloneNodes = [];
 
-      layerNodes.forEach((node, i) => {
-        const offset = (i * nodeSpacing) - (totalSpan / 2);
-        if (isHorizontal) {
-          targetPositions[node.id] = {
-            x: startX + (layerIndex * layerSpacing),
-            y: startY + 220 + offset
-          };
+      state.nodes.forEach(n => {
+        if (n.subgraph && sgMap.has(n.subgraph)) {
+          if (!sgNodes.has(n.subgraph)) sgNodes.set(n.subgraph, []);
+          sgNodes.get(n.subgraph).push(n);
         } else {
-          targetPositions[node.id] = {
-            x: startX + 380 + offset,
-            y: startY + (layerIndex * layerSpacing)
-          };
+          standaloneNodes.append ? standaloneNodes.append(n) : standaloneNodes.push(n);
         }
       });
-    });
 
-    // Collision Resolution Pass
-    const minGap = 26;
-    const nodeList = state.nodes.map(n => ({
-      id: n.id,
-      x: targetPositions[n.id] ? targetPositions[n.id].x : n.x,
-      y: targetPositions[n.id] ? targetPositions[n.id].y : n.y,
-      width: n.width || 140,
-      height: n.height || 52
-    }));
+      const sgLayouts = [];
 
-    for (let i = 0; i < nodeList.length; i++) {
-      for (let j = i + 1; j < nodeList.length; j++) {
-        const n1 = nodeList[i];
-        const n2 = nodeList[j];
-        const overlapX = (n1.x < n2.x + n2.width + minGap) && (n1.x + n1.width + minGap > n2.x);
-        const overlapY = (n1.y < n2.y + n2.height + minGap) && (n1.y + n1.height + minGap > n2.y);
-        if (overlapX && overlapY) {
-          if (isHorizontal) {
-            n2.y = n1.y + n1.height + minGap;
-            if (targetPositions[n2.id]) targetPositions[n2.id].y = n2.y;
-          } else {
-            n2.x = n1.x + n1.width + minGap;
-            if (targetPositions[n2.id]) targetPositions[n2.id].x = n2.x;
+      state.subgraphs.forEach(sg => {
+        const nList = sgNodes.get(sg.id) || [];
+        if (nList.length === 0) return;
+
+        // DFS Cycle Detection for this subgraph
+        const nodeIds = new Set(nList.map(n => n.id));
+        const adj = new Map(nList.map(n => [n.id, []]));
+        state.edges.forEach(e => {
+          if (nodeIds.has(e.from) && nodeIds.has(e.to)) {
+            adj.get(e.from).push(e.to);
+          }
+        });
+
+        const visited = new Map(nList.map(n => [n.id, 0]));
+        const backEdges = new Set();
+
+        function dfs(u) {
+          visited.set(u, 1);
+          (adj.get(u) || []).forEach(v => {
+            if (visited.get(v) === 1) backEdges.add(`${u}->${v}`);
+            else if (visited.get(v) === 0) dfs(v);
+          });
+          visited.set(u, 2);
+        }
+
+        nList.forEach(n => {
+          if (visited.get(n.id) === 0) dfs(n.id);
+        });
+
+        // Topological Ranking on forward edges
+        const forwardAdj = new Map(nList.map(n => [n.id, []]));
+        const inDegree = new Map(nList.map(n => [n.id, 0]));
+
+        state.edges.forEach(e => {
+          if (nodeIds.has(e.from) && nodeIds.has(e.to)) {
+            if (!backEdges.has(`${e.from}->${e.to}`)) {
+              forwardAdj.get(e.from).push(e.to);
+              inDegree.set(e.to, inDegree.get(e.to) + 1);
+            }
+          }
+        });
+
+        const ranks = new Map();
+        const queue = nList.filter(n => inDegree.get(n.id) === 0).map(n => n.id);
+        if (queue.length === 0 && nList.length > 0) queue.push(nList[0].id);
+        queue.forEach(id => ranks.set(id, 0));
+
+        let maxRank = 0;
+        while (queue.length > 0) {
+          const u = queue.shift();
+          const currR = ranks.get(u) || 0;
+          (forwardAdj.get(u) || []).forEach(v => {
+            const nextR = currR + 1;
+            if (!ranks.has(v) || nextR > ranks.get(v)) {
+              ranks.set(v, nextR);
+              if (nextR > maxRank) maxRank = nextR;
+            }
+            inDegree.set(v, inDegree.get(v) - 1);
+            if (inDegree.get(v) === 0) queue.push(v);
+          });
+        }
+
+        nList.forEach(n => {
+          if (!ranks.has(n.id)) ranks.set(n.id, 0);
+        });
+
+        const layers = [];
+        for (let r = 0; r <= maxRank; r++) layers[r] = [];
+        nList.forEach(n => layers[ranks.get(n.id)].push(n));
+
+        // Place nodes locally within subgraph
+        const layerSpacing = 100;
+        const nodeSpacing = 240;
+        const localPos = new Map();
+        let maxW = 0, maxH = 0;
+
+        layers.forEach((layerNodes, r) => {
+          const totalW = (layerNodes.length - 1) * nodeSpacing;
+          layerNodes.forEach((n, i) => {
+            const lx = 32 + (i * nodeSpacing);
+            const ly = 56 + (r * layerSpacing);
+            localPos.set(n.id, { x: lx, y: ly, width: n.width || 140, height: n.height || 52 });
+            if (lx + (n.width || 140) > maxW) maxW = lx + (n.width || 140);
+            if (ly + (n.height || 52) > maxH) maxH = ly + (n.height || 52);
+          });
+        });
+
+        sgLayouts.push({
+          id: sg.id,
+          title: sg.title,
+          width: Math.max(maxW + 36, 320),
+          height: Math.max(maxH + 36, 160),
+          localPos: localPos,
+          nodes: nList
+        });
+      });
+
+      // Arrange Subgraphs into clean columns (Balanced Grid)
+      const numCols = sgLayouts.length >= 3 ? 3 : (sgLayouts.length === 2 ? 2 : 1);
+      const cols = Array.from({ length: numCols }, () => []);
+      
+      if (sgLayouts.length === 4) {
+        cols[0].push(sgLayouts[0], sgLayouts[1]); // Main & Coordinator
+        cols[1].push(sgLayouts[2]);               // Validator
+        cols[2].push(sgLayouts[3]);               // Digit
+      } else {
+        sgLayouts.forEach((sgl, idx) => {
+          cols[idx % numCols].push(sgl);
+        });
+      }
+
+      let currX = 80;
+      const startY = 90;
+      const colGap = 70;
+      const rowGap = 50;
+
+      cols.forEach(colSgs => {
+        if (colSgs.length === 0) return;
+        const colWidth = Math.max(...colSgs.map(s => s.width));
+        let currY = startY;
+
+        colSgs.forEach(sgl => {
+          sgl.localPos.forEach((lpos, nid) => {
+            targetPositions[nid] = {
+              x: currX + lpos.x,
+              y: currY + lpos.y
+            };
+          });
+          currY += sgl.height + rowGap;
+        });
+
+        currX += colWidth + colGap;
+      });
+
+    } else {
+      // 2. Global DAG Layout with Cycle Detection
+      const isHorizontal = state.direction === 'LR' || state.direction === 'RL';
+      const isReversed = state.direction === 'BT' || state.direction === 'RL';
+
+      const nodeIds = new Set(state.nodes.map(n => n.id));
+      const adj = new Map(state.nodes.map(n => [n.id, []]));
+      state.edges.forEach(e => {
+        if (adj.has(e.from) && nodeIds.has(e.to)) {
+          adj.get(e.from).push(e.to);
+        }
+      });
+
+      const visited = new Map(state.nodes.map(n => [n.id, 0]));
+      const backEdges = new Set();
+
+      function dfs(u) {
+        visited.set(u, 1);
+        (adj.get(u) || []).forEach(v => {
+          if (visited.get(v) === 1) backEdges.add(`${u}->${v}`);
+          else if (visited.get(v) === 0) dfs(v);
+        });
+        visited.set(u, 2);
+      }
+
+      state.nodes.forEach(n => {
+        if (visited.get(n.id) === 0) dfs(n.id);
+      });
+
+      const forwardAdj = new Map(state.nodes.map(n => [n.id, []]));
+      const inDegree = new Map(state.nodes.map(n => [n.id, 0]));
+
+      state.edges.forEach(e => {
+        if (nodeIds.has(e.from) && nodeIds.has(e.to)) {
+          if (!backEdges.has(`${e.from}->${e.to}`)) {
+            forwardAdj.get(e.from).push(e.to);
+            inDegree.set(e.to, inDegree.get(e.to) + 1);
           }
         }
+      });
+
+      const ranks = new Map();
+      const queue = state.nodes.filter(n => inDegree.get(n.id) === 0).map(n => n.id);
+      if (queue.length === 0 && state.nodes.length > 0) queue.push(state.nodes[0].id);
+      queue.forEach(id => ranks.set(id, 0));
+
+      let maxRank = 0;
+      while (queue.length > 0) {
+        const u = queue.shift();
+        const currR = ranks.get(u) || 0;
+        (forwardAdj.get(u) || []).forEach(v => {
+          const nextR = currR + 1;
+          if (!ranks.has(v) || nextR > ranks.get(v)) {
+            ranks.set(v, nextR);
+            if (nextR > maxRank) maxRank = nextR;
+          }
+          inDegree.set(v, inDegree.get(v) - 1);
+          if (inDegree.get(v) === 0) queue.push(v);
+        });
       }
+
+      state.nodes.forEach(n => {
+        if (!ranks.has(n.id)) ranks.set(n.id, 0);
+      });
+
+      const layers = [];
+      for (let r = 0; r <= maxRank; r++) layers[r] = [];
+      state.nodes.forEach(n => layers[ranks.get(n.id)].push(n));
+
+      const layerSpacing = isHorizontal ? 280 : 160;
+      const nodeSpacing = isHorizontal ? 130 : 250;
+      const startX = 140;
+      const startY = 110;
+
+      layers.forEach((layerNodes, r) => {
+        const layerIndex = isReversed ? (layers.length - 1 - r) : r;
+        const totalSpan = (layerNodes.length - 1) * nodeSpacing;
+
+        layerNodes.forEach((node, i) => {
+          const offset = (i * nodeSpacing) - (totalSpan / 2);
+          if (isHorizontal) {
+            targetPositions[node.id] = {
+              x: startX + (layerIndex * layerSpacing),
+              y: startY + 220 + offset
+            };
+          } else {
+            targetPositions[node.id] = {
+              x: startX + 380 + offset,
+              y: startY + (layerIndex * layerSpacing)
+            };
+          }
+        });
+      });
     }
 
     if (animate) {
@@ -803,17 +964,53 @@
     }
 
     let code = `flowchart ${state.direction}\n`;
-    code += `    %% Nodos\n`;
-    state.nodes.forEach(node => {
-      const shapeDef = SHAPES[node.shape] || SHAPES.process;
-      const cleanLabel = (node.label || 'Nodo')
-        .replace(/"/g, "'")
-        .replace(/\n/g, '<br/>');
-      code += `    ${node.id}${shapeDef.prefix}"${cleanLabel}"${shapeDef.suffix}\n`;
-    });
+
+    if (state.subgraphs && state.subgraphs.length > 0) {
+      const sgNodeMap = new Map();
+      const standalone = [];
+
+      state.nodes.forEach(n => {
+        if (n.subgraph) {
+          if (!sgNodeMap.has(n.subgraph)) sgNodeMap.set(n.subgraph, []);
+          sgNodeMap.get(n.subgraph).push(n);
+        } else {
+          standalone.push(n);
+        }
+      });
+
+      state.subgraphs.forEach(sg => {
+        const sNodes = sgNodeMap.get(sg.id) || [];
+        if (sNodes.length > 0) {
+          code += `    subgraph ${sg.id} ["${sg.title}"]\n`;
+          sNodes.forEach(node => {
+            const shapeDef = SHAPES[node.shape] || SHAPES.process;
+            const cleanLabel = (node.label || 'Nodo').replace(/"/g, "'").replace(/\n/g, '<br/>');
+            code += `        ${node.id}${shapeDef.prefix}"${cleanLabel}"${shapeDef.suffix}\n`;
+          });
+          code += `    end\n\n`;
+        }
+      });
+
+      if (standalone.length > 0) {
+        code += `    %% Nodos independientes\n`;
+        standalone.forEach(node => {
+          const shapeDef = SHAPES[node.shape] || SHAPES.process;
+          const cleanLabel = (node.label || 'Nodo').replace(/"/g, "'").replace(/\n/g, '<br/>');
+          code += `    ${node.id}${shapeDef.prefix}"${cleanLabel}"${shapeDef.suffix}\n`;
+        });
+        code += `\n`;
+      }
+    } else {
+      code += `    %% Nodos\n`;
+      state.nodes.forEach(node => {
+        const shapeDef = SHAPES[node.shape] || SHAPES.process;
+        const cleanLabel = (node.label || 'Nodo').replace(/"/g, "'").replace(/\n/g, '<br/>');
+        code += `    ${node.id}${shapeDef.prefix}"${cleanLabel}"${shapeDef.suffix}\n`;
+      });
+    }
 
     if (state.edges.length > 0) {
-      code += `\n    %% Conexiones\n`;
+      code += `    %% Conexiones\n`;
       state.edges.forEach(edge => {
         let connector = '-->';
         if (edge.style === 'dotted') connector = '-.->';
@@ -823,10 +1020,12 @@
         const label = (edge.label || '').trim();
         if (label) {
           const clean = label.replace(/"/g, "'");
-          if (edge.style === 'normal' || !edge.style) {
-            code += `    ${edge.from} -- "${clean}" --> ${edge.to}\n`;
+          if (edge.style === 'dotted') {
+            code += `    ${edge.from} -.-> |"${clean}"| ${edge.to}\n`;
+          } else if (edge.style === 'thick') {
+            code += `    ${edge.from} ==> |"${clean}"| ${edge.to}\n`;
           } else {
-            code += `    ${edge.from} ${connector}|"${clean}"| ${edge.to}\n`;
+            code += `    ${edge.from} -- "${clean}" --> ${edge.to}\n`;
           }
         } else {
           code += `    ${edge.from} ${connector} ${edge.to}\n`;
@@ -854,8 +1053,47 @@
 
   // --- RENDERING CANVAS ---
   function render() {
+    renderSubgraphs();
     renderNodes();
     renderEdges();
+  }
+
+  function renderSubgraphs() {
+    if (!dom.subgraphsLayer) return;
+    dom.subgraphsLayer.innerHTML = '';
+
+    if (!state.subgraphs || state.subgraphs.length === 0) return;
+
+    state.subgraphs.forEach(sg => {
+      const memberNodes = state.nodes.filter(n => n.subgraph === sg.id);
+      if (memberNodes.length === 0) return;
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      memberNodes.forEach(n => {
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + (n.width || 140));
+        maxY = Math.max(maxY, n.y + (n.height || 52));
+      });
+
+      const padX = 22;
+      const padTop = 44;
+      const padBottom = 22;
+
+      const sgEl = document.createElement('div');
+      sgEl.className = 'canvas-subgraph';
+      sgEl.style.left = `${minX - padX}px`;
+      sgEl.style.top = `${minY - padTop}px`;
+      sgEl.style.width = `${maxX - minX + padX * 2}px`;
+      sgEl.style.height = `${maxY - minY + padTop + padBottom}px`;
+
+      const header = document.createElement('div');
+      header.className = 'subgraph-header';
+      header.innerHTML = `<span>📦 ${sg.title}</span>`;
+      sgEl.appendChild(header);
+
+      dom.subgraphsLayer.appendChild(sgEl);
+    });
   }
 
   function renderNodes() {
@@ -881,7 +1119,7 @@
       nodeEl.style.height = `${h}px`;
       nodeEl.dataset.id = node.id;
 
-      // 1. Dynamic Pure SVG Vector Shape
+      // 1. Dynamic SVG Vector Shape
       const svgBg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svgBg.setAttribute('class', 'node-vector-svg');
       svgBg.setAttribute('viewBox', `0 0 ${w} ${h}`);
@@ -1155,7 +1393,7 @@
       maxY = Math.max(maxY, n.y + (n.height || 52));
     });
 
-    const pad = 40;
+    const pad = 60;
     const w = maxX - minX + pad * 2;
     const h = maxY - minY + pad * 2;
     const ox = minX - pad;
@@ -1166,6 +1404,7 @@
     svg += `    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }\n`;
     svg += `    .edge { stroke: #64748b; stroke-width: 2.5px; fill: none; }\n`;
     svg += `    .label-bg { fill: #1e293b; stroke: #475569; rx: 4px; }\n`;
+    svg += `    .sg-bg { fill: rgba(30, 41, 59, 0.4); stroke: rgba(56, 189, 248, 0.5); stroke-dasharray: 6 6; rx: 12px; }\n`;
     svg += `  </style>\n`;
     svg += `  <defs>\n`;
     svg += `    <marker id="m-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">\n`;
@@ -1173,6 +1412,28 @@
     svg += `    </marker>\n`;
     svg += `  </defs>\n`;
     svg += `  <rect width="100%" height="100%" fill="${state.theme === 'dark' ? '#090d16' : '#ffffff'}"/>\n`;
+
+    // Subgraphs
+    if (state.subgraphs) {
+      state.subgraphs.forEach(sg => {
+        const mNodes = state.nodes.filter(n => n.subgraph === sg.id);
+        if (mNodes.length > 0) {
+          let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
+          mNodes.forEach(n => {
+            sMinX = Math.min(sMinX, n.x);
+            sMinY = Math.min(sMinY, n.y);
+            sMaxX = Math.max(sMaxX, n.x + (n.width || 140));
+            sMaxY = Math.max(sMaxY, n.y + (n.height || 52));
+          });
+          const sx = sMinX - ox - 20;
+          const sy = sMinY - oy - 40;
+          const sw = sMaxX - sMinX + 40;
+          const sh = sMaxY - sMinY + 60;
+          svg += `  <rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" class="sg-bg"/>\n`;
+          svg += `  <text x="${sx + 14}" y="${sy + 22}" font-size="12" font-weight="800" fill="#38bdf8">${sg.title}</text>\n`;
+        }
+      });
+    }
 
     // Edges
     state.edges.forEach(edge => {
@@ -1299,12 +1560,12 @@
     });
 
     const rect = dom.viewport.getBoundingClientRect();
-    const graphW = maxX - minX + 140;
-    const graphH = maxY - minY + 140;
+    const graphW = maxX - minX + 160;
+    const graphH = maxY - minY + 160;
 
     const scaleX = rect.width / graphW;
     const scaleY = rect.height / graphH;
-    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.4), 1.6);
+    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.35), 1.5);
 
     state.zoom = newZoom;
     state.pan.x = (rect.width - (maxX + minX) * newZoom) / 2;
@@ -1328,7 +1589,7 @@
 
     // Double Click on Canvas Background -> Create node
     dom.viewport.addEventListener('dblclick', (e) => {
-      if (e.target === dom.viewport || e.target.id === 'svg-canvas' || e.target.id === 'canvas-world') {
+      if (e.target === dom.viewport || e.target.id === 'svg-canvas' || e.target.id === 'canvas-world' || e.target.id === 'subgraphs-layer') {
         const pt = screenToWorld(e.clientX, e.clientY);
         createNode('process', pt.x - 70, pt.y - 26);
       }
@@ -1341,6 +1602,7 @@
       if (confirm('¿Limpiar todo el lienzo?')) {
         state.nodes = [];
         state.edges = [];
+        state.subgraphs = [];
         state.selectedNodeIds.clear();
         state.selectedEdgeId = null;
         hideToolbars();
@@ -1550,7 +1812,7 @@
     });
   }
 
-  // --- MOUSE & TOUCH HANDLERS (With Shift+Wheel & Ctrl+Click Multi-Selection) ---
+  // --- MOUSE & TOUCH HANDLERS ---
   function handleCanvasMouseDown(e) {
     if (e.target.classList.contains('node-port')) {
       e.stopPropagation();
@@ -1576,7 +1838,6 @@
         return;
       }
 
-      // Inline text edit on double click
       if (state.selectedNodeIds.has(nodeId) && e.detail === 2) {
         state.editingNodeId = nodeId;
         hideToolbars();
@@ -1584,7 +1845,6 @@
         return;
       }
 
-      // Multi-selection with Ctrl / Cmd
       if (e.ctrlKey || e.metaKey) {
         if (state.selectedNodeIds.has(nodeId)) {
           state.selectedNodeIds.delete(nodeId);
@@ -1601,7 +1861,6 @@
       state.selectedEdgeId = null;
       hideEdgePopover();
 
-      // Prepare multi-drag
       state.isDraggingNodes = true;
       state.dragStartMouse = { x: e.clientX, y: e.clientY };
       state.dragInitialNodePos.clear();
@@ -1628,7 +1887,6 @@
       return;
     }
 
-    // Click on canvas background -> Deselect all & Pan
     state.selectedNodeIds.clear();
     state.selectedEdgeId = null;
     state.editingNodeId = null;
@@ -1706,14 +1964,13 @@
   function handleWheel(e) {
     e.preventDefault();
 
-    // 1. Ctrl / Cmd + Wheel -> Zoom in / out
     if (e.ctrlKey || e.metaKey) {
       const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
       const rect = dom.viewport.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.3), 2.5);
+      const newZoom = Math.min(Math.max(state.zoom * zoomFactor, 0.25), 2.5);
       state.pan.x = mouseX - (mouseX - state.pan.x) * (newZoom / state.zoom);
       state.pan.y = mouseY - (mouseY - state.pan.y) * (newZoom / state.zoom);
       state.zoom = newZoom;
@@ -1723,7 +1980,6 @@
       return;
     }
 
-    // 2. Shift + Wheel -> Horizontal Pan
     if (e.shiftKey) {
       const delta = (e.deltaY !== 0 ? e.deltaY : e.deltaX) * 1.1;
       state.pan.x -= delta;
@@ -1732,7 +1988,6 @@
       return;
     }
 
-    // 3. Normal Wheel -> Vertical Pan (or 2D trackpad pan)
     state.pan.x -= (e.deltaX || 0) * 1.1;
     state.pan.y -= (e.deltaY || 0) * 1.1;
     updateWorldTransform();
@@ -1740,7 +1995,7 @@
   }
 
   function setZoom(val) {
-    state.zoom = Math.min(Math.max(val, 0.3), 2.5);
+    state.zoom = Math.min(Math.max(val, 0.25), 2.5);
     updateWorldTransform();
     updateToolbars();
   }
@@ -1863,9 +2118,102 @@
   // --- PRESET TEMPLATES ---
   function loadTemplate(key) {
     const templates = {
+      pin_system: {
+        direction: 'TD',
+        connStyle: 'curved',
+        subgraphs: [
+          { id: 'BLOQUE_PRINCIPAL', title: 'Programa Principal (__main__)' },
+          { id: 'OFICINA_COORDINADORA', title: 'Función: solicitar_pin()' },
+          { id: 'OFICINA_VALIDADORA', title: 'Función: es_pin_valido(pin_texto)' },
+          { id: 'OFICINA_DIGITO', title: 'Función pura: es_digito(c)' }
+        ],
+        nodes: [
+          // Bloque Principal
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', subgraph: 'BLOQUE_PRINCIPAL' },
+          { id: 'B', shape: 'process', color: 'sky', label: 'Llamar a solicitar_pin', subgraph: 'BLOQUE_PRINCIPAL' },
+          { id: 'C', shape: 'terminal', color: 'emerald', label: 'Fin del Programa', subgraph: 'BLOQUE_PRINCIPAL' },
+
+          // Oficina Coordinadora
+          { id: 'F1', shape: 'terminal', color: 'emerald', label: 'Inicio solicitar_pin', subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F2', shape: 'process', color: 'sky', label: 'Iniciar Bucle: while True', subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F3', shape: 'io', color: 'cyan', label: 'Leer entrada del usuario: pin_ingresado', subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F4', shape: 'process', color: 'sky', label: 'Llamar a es_pin_valido(pin_ingresado)', subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F5', shape: 'decision', color: 'amber', label: '¿El resultado devuelto es True?', subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F6', shape: 'process', color: 'emerald', label: "Imprimir: 'Acceso Permitido'", subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F7', shape: 'process', color: 'sky', label: 'Romper bucle: break', subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F8', shape: 'process', color: 'rose', label: "Imprimir: 'PIN Inválido, intente de nuevo'", subgraph: 'OFICINA_COORDINADORA' },
+          { id: 'F9', shape: 'terminal', color: 'emerald', label: 'Fin solicitar_pin', subgraph: 'OFICINA_COORDINADORA' },
+
+          // Oficina Validadora
+          { id: 'V1', shape: 'terminal', color: 'emerald', label: 'Inicio es_pin_valido', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V2', shape: 'decision', color: 'amber', label: '¿La longitud de pin_texto es diferente de 4?', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V3', shape: 'process', color: 'rose', label: 'return False', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V4', shape: 'process', color: 'sky', label: 'Inicializar: suma_digitos = 0', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V5', shape: 'process', color: 'sky', label: "Bucle: Para cada 'caracter' en pin_texto", subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V6', shape: 'process', color: 'sky', label: 'Llamar a es_digito(caracter)', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V7', shape: 'decision', color: 'amber', label: '¿El resultado devuelto es True?', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V8', shape: 'process', color: 'rose', label: 'return False', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V9', shape: 'process', color: 'sky', label: "Convertir 'caracter' a entero y sumarlo a suma_digitos", subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V10', shape: 'decision', color: 'amber', label: '¿Quedan más caracteres?', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V11', shape: 'decision', color: 'amber', label: '¿suma_digitos es par? (suma % 2 == 0)', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V12', shape: 'process', color: 'emerald', label: 'return True', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V13', shape: 'process', color: 'rose', label: 'return False', subgraph: 'OFICINA_VALIDADORA' },
+          { id: 'V14', shape: 'terminal', color: 'emerald', label: 'Fin de es_pin_valido', subgraph: 'OFICINA_VALIDADORA' },
+
+          // Oficina Digito
+          { id: 'D1', shape: 'terminal', color: 'emerald', label: 'Inicio es_digito', subgraph: 'OFICINA_DIGITO' },
+          { id: 'D2', shape: 'decision', color: 'amber', label: "¿El carácter 'c' está entre '0' y '9'?", subgraph: 'OFICINA_DIGITO' },
+          { id: 'D3', shape: 'process', color: 'emerald', label: 'return True', subgraph: 'OFICINA_DIGITO' },
+          { id: 'D4', shape: 'process', color: 'rose', label: 'return False', subgraph: 'OFICINA_DIGITO' },
+          { id: 'D5', shape: 'terminal', color: 'emerald', label: 'Fin de es_digito', subgraph: 'OFICINA_DIGITO' }
+        ],
+        edges: [
+          { id: 'e1', from: 'A', to: 'B', style: 'normal' },
+          { id: 'e2', from: 'B', to: 'C', style: 'normal' },
+          { id: 'e3', from: 'F1', to: 'F2', style: 'normal' },
+          { id: 'e4', from: 'F2', to: 'F3', style: 'normal' },
+          { id: 'e5', from: 'F3', to: 'F4', style: 'normal' },
+          { id: 'e6', from: 'F4', to: 'F5', style: 'normal' },
+          { id: 'e7', from: 'F5', to: 'F6', label: 'SÍ', style: 'normal' },
+          { id: 'e8', from: 'F6', to: 'F7', style: 'normal' },
+          { id: 'e9', from: 'F5', to: 'F8', label: 'NO', style: 'normal' },
+          { id: 'e10', from: 'F8', to: 'F2', style: 'normal' },
+          { id: 'e11', from: 'F7', to: 'F9', style: 'normal' },
+          { id: 'e12', from: 'V1', to: 'V2', style: 'normal' },
+          { id: 'e13', from: 'V2', to: 'V3', label: 'SÍ', style: 'normal' },
+          { id: 'e14', from: 'V2', to: 'V4', label: 'NO', style: 'normal' },
+          { id: 'e15', from: 'V4', to: 'V5', style: 'normal' },
+          { id: 'e16', from: 'V5', to: 'V6', style: 'normal' },
+          { id: 'e17', from: 'V6', to: 'V7', style: 'normal' },
+          { id: 'e18', from: 'V7', to: 'V8', label: 'NO', style: 'normal' },
+          { id: 'e19', from: 'V7', to: 'V9', label: 'SÍ', style: 'normal' },
+          { id: 'e20', from: 'V9', to: 'V10', style: 'normal' },
+          { id: 'e21', from: 'V10', to: 'V5', label: 'SÍ', style: 'normal' },
+          { id: 'e22', from: 'V10', to: 'V11', label: 'NO', style: 'normal' },
+          { id: 'e23', from: 'V11', to: 'V12', label: 'SÍ', style: 'normal' },
+          { id: 'e24', from: 'V11', to: 'V13', label: 'NO', style: 'normal' },
+          { id: 'e25', from: 'V3', to: 'V14', style: 'normal' },
+          { id: 'e26', from: 'V8', to: 'V14', style: 'normal' },
+          { id: 'e27', from: 'V12', to: 'V14', style: 'normal' },
+          { id: 'e28', from: 'V13', to: 'V14', style: 'normal' },
+          { id: 'e29', from: 'D1', to: 'D2', style: 'normal' },
+          { id: 'e30', from: 'D2', to: 'D3', label: 'SÍ', style: 'normal' },
+          { id: 'e31', from: 'D2', to: 'D4', label: 'NO', style: 'normal' },
+          { id: 'e32', from: 'D3', to: 'D5', style: 'normal' },
+          { id: 'e33', from: 'D4', to: 'D5', style: 'normal' },
+          // Inter-subgraph links
+          { id: 'e34', from: 'B', to: 'F1', style: 'dotted' },
+          { id: 'e35', from: 'F9', to: 'C', style: 'dotted' },
+          { id: 'e36', from: 'F4', to: 'V1', label: 'Pasa: pin_ingresado', style: 'dotted' },
+          { id: 'e37', from: 'V14', to: 'F5', label: 'Devuelve: True/False', style: 'dotted' },
+          { id: 'e38', from: 'V6', to: 'D1', label: 'Pasa: caracter', style: 'dotted' },
+          { id: 'e39', from: 'D5', to: 'V7', label: 'Devuelve: True/False', style: 'dotted' }
+        ]
+      },
       auth: {
         direction: 'TD',
         connStyle: 'curved',
+        subgraphs: [],
         nodes: [
           { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', x: 200, y: 50 },
           { id: 'B', shape: 'io', color: 'cyan', label: 'Ingresar Credenciales', x: 200, y: 150 },
@@ -1886,6 +2234,7 @@
       payment: {
         direction: 'TD',
         connStyle: 'curved',
+        subgraphs: [],
         nodes: [
           { id: 'A', shape: 'terminal', color: 'emerald', label: 'Checkout Carrito', x: 200, y: 50 },
           { id: 'B', shape: 'decision', color: 'amber', label: '¿Tarjeta Válida?', x: 200, y: 160 },
@@ -1906,6 +2255,7 @@
       etl: {
         direction: 'LR',
         connStyle: 'curved',
+        subgraphs: [],
         nodes: [
           { id: 'A', shape: 'database', color: 'purple', label: 'Fuente CSV / API', x: 50, y: 150 },
           { id: 'B', shape: 'process', color: 'sky', label: 'Extracción Datos', x: 250, y: 150 },
@@ -1925,6 +2275,7 @@
       blank: {
         direction: 'TD',
         connStyle: 'curved',
+        subgraphs: [],
         nodes: [],
         edges: []
       }
@@ -1934,6 +2285,7 @@
     if (tpl) {
       state.nodes = JSON.parse(JSON.stringify(tpl.nodes));
       state.edges = JSON.parse(JSON.stringify(tpl.edges));
+      state.subgraphs = JSON.parse(JSON.stringify(tpl.subgraphs || []));
       state.direction = tpl.direction;
       state.connStyle = tpl.connStyle || 'curved';
       if (dom.selectDirection) dom.selectDirection.value = tpl.direction;
