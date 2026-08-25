@@ -1,10 +1,71 @@
 /**
- * MermaidFlow Studio - True SVG Vector Flowchart & Bidirectional Mermaid Editor
+ * MermaidFlow Studio - Complete Dynamic Vector Flowchart & Bidirectional Mermaid Editor
  * High-Performance Vanilla JS + SVG Architecture
  */
 
 (function () {
   'use strict';
+
+  // Canvas 2D context for precise text measurement
+  const offscreenCanvas = document.createElement('canvas');
+  const measureCtx = offscreenCanvas.getContext('2d');
+  measureCtx.font = '700 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
+  function measureTextSize(text) {
+    if (!text) return { width: 40, height: 20, lines: 1 };
+    const lines = text.split(/\n|<br\s*[\/]?>/i);
+    let maxWidth = 0;
+    lines.forEach(line => {
+      const w = measureCtx.measureText(line.trim() || 'A').width;
+      if (w > maxWidth) maxWidth = w;
+    });
+    return {
+      width: Math.ceil(maxWidth),
+      height: lines.length * 18,
+      lines: lines.length
+    };
+  }
+
+  function computeNodeDimensions(shape, label) {
+    const metrics = measureTextSize(label || 'Nodo');
+    const minW = 120;
+    const minH = 48;
+
+    switch (shape) {
+      case 'decision': {
+        // Rhombus geometry: useful inner area is diamond inscribed in rectangle
+        const w = Math.max(150, Math.round(metrics.width * 1.5 + 36));
+        const h = Math.max(72, Math.round(metrics.lines * 22 + 42));
+        return { width: w, height: h };
+      }
+      case 'database': {
+        const w = Math.max(130, Math.round(metrics.width + 36));
+        const h = Math.max(62, Math.round(metrics.lines * 20 + 38));
+        return { width: w, height: h };
+      }
+      case 'io': {
+        const w = Math.max(140, Math.round(metrics.width + 46));
+        const h = Math.max(50, Math.round(metrics.lines * 19 + 26));
+        return { width: w, height: h };
+      }
+      case 'terminal': {
+        const w = Math.max(130, Math.round(metrics.width + 40));
+        const h = Math.max(50, Math.round(metrics.lines * 19 + 26));
+        return { width: w, height: h };
+      }
+      case 'subroutine': {
+        const w = Math.max(140, Math.round(metrics.width + 44));
+        const h = Math.max(50, Math.round(metrics.lines * 19 + 26));
+        return { width: w, height: h };
+      }
+      case 'process':
+      default: {
+        const w = Math.max(minW, Math.round(metrics.width + 36));
+        const h = Math.max(minH, Math.round(metrics.lines * 19 + 26));
+        return { width: w, height: h };
+      }
+    }
+  }
 
   // --- NODE SHAPE DEFINITIONS WITH PURE VECTOR SVG GENERATORS ---
   const SHAPES = {
@@ -13,8 +74,6 @@
       prefix: '([',
       suffix: '])',
       defaultText: 'Inicio',
-      defaultWidth: 140,
-      defaultHeight: 52,
       generateSvg: (w, h) => `
         <rect x="2" y="2" width="${w - 4}" height="${h - 4}" rx="${(h - 4) / 2}" ry="${(h - 4) / 2}" class="shape-svg-fill" />
       `
@@ -24,8 +83,6 @@
       prefix: '[',
       suffix: ']',
       defaultText: 'Proceso',
-      defaultWidth: 140,
-      defaultHeight: 52,
       generateSvg: (w, h) => `
         <rect x="2" y="2" width="${w - 4}" height="${h - 4}" rx="6" ry="6" class="shape-svg-fill" />
       `
@@ -35,8 +92,6 @@
       prefix: '{',
       suffix: '}',
       defaultText: '¿Es válido?',
-      defaultWidth: 160,
-      defaultHeight: 76,
       generateSvg: (w, h) => `
         <polygon points="${w / 2},2 ${w - 2},${h / 2} ${w / 2},${h - 2} 2,${h / 2}" class="shape-svg-fill" />
       `
@@ -46,8 +101,6 @@
       prefix: '[(',
       suffix: ')]',
       defaultText: 'Base de Datos',
-      defaultWidth: 140,
-      defaultHeight: 64,
       generateSvg: (w, h) => {
         const ry = 9;
         const cyTop = 12;
@@ -65,8 +118,6 @@
       prefix: '[/',
       suffix: '/]',
       defaultText: 'Leer Datos',
-      defaultWidth: 150,
-      defaultHeight: 52,
       generateSvg: (w, h) => `
         <polygon points="18,2 ${w - 2},2 ${w - 18},${h - 2} 2,${h - 2}" class="shape-svg-fill" />
       `
@@ -76,8 +127,6 @@
       prefix: '[[',
       suffix: ']]',
       defaultText: 'Subproceso()',
-      defaultWidth: 150,
-      defaultHeight: 52,
       generateSvg: (w, h) => `
         <rect x="2" y="2" width="${w - 4}" height="${h - 4}" rx="4" ry="4" class="shape-svg-fill" />
         <line x1="14" y1="2" x2="14" y2="${h - 2}" class="shape-svg-stroke" />
@@ -95,6 +144,7 @@
     editingNodeId: null,
     activeColor: 'emerald',
     direction: 'TD',
+    connStyle: 'curved', // 'curved' | 'orthogonal' | 'straight'
     pan: { x: 100, y: 90 },
     zoom: 1,
     isPanning: false,
@@ -141,14 +191,23 @@
     btnRedo: $('btn-redo'),
     btnClear: $('btn-clear'),
     btnTheme: $('btn-theme-toggle'),
+    btnExportMenu: $('btn-export-menu'),
+    exportDropdown: $('export-dropdown'),
+    btnExportSvg: $('btn-export-svg'),
+    btnExportPng: $('btn-export-png'),
+    btnCopySvg: $('btn-copy-svg'),
     btnDownloadMmd: $('btn-download-mmd'),
     selectTemplate: $('select-template'),
     selectDirection: $('select-direction'),
+    selectConnStyle: $('select-conn-style'),
     btnAutoLayout: $('btn-auto-layout'),
     zoomIn: $('btn-zoom-in'),
     zoomOut: $('btn-zoom-out'),
-    zoomReset: $('btn-zoom-reset'),
+    zoomFit: $('btn-zoom-fit'),
     zoomValue: $('zoom-value'),
+    minimap: $('canvas-minimap'),
+    minimapSvg: $('minimap-svg'),
+    minimapViewfinder: $('minimap-viewfinder'),
     statNodes: $('stat-nodes'),
     statEdges: $('stat-edges'),
     syncStatus: $('sync-status'),
@@ -183,7 +242,8 @@
     const snapshot = JSON.stringify({
       nodes: state.nodes,
       edges: state.edges,
-      direction: state.direction
+      direction: state.direction,
+      connStyle: state.connStyle
     });
 
     if (state.historyIdx < state.history.length - 1) {
@@ -200,6 +260,7 @@
       updateMermaidCode();
     }
     updateStats();
+    updateMinimap();
   }
 
   function undo() {
@@ -224,7 +285,9 @@
       state.nodes = data.nodes || [];
       state.edges = data.edges || [];
       state.direction = data.direction || 'TD';
+      state.connStyle = data.connStyle || 'curved';
       if (dom.selectDirection) dom.selectDirection.value = state.direction;
+      if (dom.selectConnStyle) dom.selectConnStyle.value = state.connStyle;
       state.selectedNodeId = null;
       state.selectedEdgeId = null;
       hideNodeToolbar();
@@ -232,6 +295,7 @@
       render();
       updateMermaidCode();
       updateStats();
+      updateMinimap();
     } catch (e) {
       console.error(e);
     }
@@ -246,7 +310,9 @@
           state.nodes = data.nodes;
           state.edges = data.edges || [];
           state.direction = data.direction || 'TD';
+          state.connStyle = data.connStyle || 'curved';
           if (dom.selectDirection) dom.selectDirection.value = state.direction;
+          if (dom.selectConnStyle) dom.selectConnStyle.value = state.connStyle;
           return true;
         }
       }
@@ -286,17 +352,19 @@
   // --- NODE & EDGE OPERATIONS ---
   function createNode(shape, x, y, label = null, color = null) {
     const shapeDef = SHAPES[shape] || SHAPES.process;
+    const nodeText = label || shapeDef.defaultText;
     const nodeColor = color || (shape === 'terminal' ? 'emerald' : (shape === 'decision' ? 'amber' : (shape === 'database' ? 'purple' : state.activeColor)));
+    const dims = computeNodeDimensions(shape, nodeText);
 
     const node = {
       id: getNextNodeId(),
       shape: shape,
       color: nodeColor,
-      label: label || shapeDef.defaultText,
+      label: nodeText,
       x: Math.round(x),
       y: Math.round(y),
-      width: shapeDef.defaultWidth,
-      height: shapeDef.defaultHeight
+      width: dims.width,
+      height: dims.height
     };
 
     state.nodes.push(node);
@@ -308,6 +376,19 @@
     saveState();
     positionNodeToolbar(node);
     return node;
+  }
+
+  function updateNodeText(nodeId, newText) {
+    const node = state.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const shapeDef = SHAPES[node.shape] || SHAPES.process;
+    node.label = newText.trim() || shapeDef.defaultText;
+    const dims = computeNodeDimensions(node.shape, node.label);
+    node.width = dims.width;
+    node.height = dims.height;
+    render();
+    saveState();
+    positionNodeToolbar(node);
   }
 
   function createEdge(fromId, toId, fromPort = 'bottom', toPort = 'top', label = '', style = 'normal') {
@@ -350,14 +431,14 @@
     let newY = fromNode.y;
 
     if (conditionLabel === 'Sí') {
-      newX = isHorizontal ? fromNode.x + 230 : fromNode.x - 120;
-      newY = isHorizontal ? fromNode.y - 80 : fromNode.y + 140;
+      newX = isHorizontal ? fromNode.x + fromNode.width + 90 : fromNode.x - 130;
+      newY = isHorizontal ? fromNode.y - 80 : fromNode.y + fromNode.height + 80;
     } else if (conditionLabel === 'No') {
-      newX = isHorizontal ? fromNode.x + 230 : fromNode.x + 120;
-      newY = isHorizontal ? fromNode.y + 80 : fromNode.y + 140;
+      newX = isHorizontal ? fromNode.x + fromNode.width + 90 : fromNode.x + 130;
+      newY = isHorizontal ? fromNode.y + 80 : fromNode.y + fromNode.height + 80;
     } else {
-      newX = isHorizontal ? fromNode.x + 230 : fromNode.x;
-      newY = isHorizontal ? fromNode.y : fromNode.y + 140;
+      newX = isHorizontal ? fromNode.x + fromNode.width + 90 : fromNode.x;
+      newY = isHorizontal ? fromNode.y : fromNode.y + fromNode.height + 80;
     }
 
     const nextText = conditionLabel === 'Sí' ? 'Acción Sí' : (conditionLabel === 'No' ? 'Acción No' : 'Siguiente Paso');
@@ -441,7 +522,7 @@
           else if (match[14] !== undefined) { shape = 'process'; lbl = match[15]; }
 
           lbl = cleanStr(lbl);
-          const shapeDef = SHAPES[shape] || SHAPES.process;
+          const dims = computeNodeDimensions(shape, lbl);
 
           if (!nodesMap.has(nid)) {
             let nodeColor = 'sky';
@@ -459,16 +540,16 @@
               label: lbl,
               x: existing ? existing.x : 0,
               y: existing ? existing.y : 0,
-              width: shapeDef.defaultWidth,
-              height: shapeDef.defaultHeight
+              width: dims.width,
+              height: dims.height
             });
           } else {
             const n = nodesMap.get(nid);
             if (lbl) n.label = lbl;
             if (shape !== 'process') {
               n.shape = shape;
-              n.width = shapeDef.defaultWidth;
-              n.height = shapeDef.defaultHeight;
+              n.width = dims.width;
+              n.height = dims.height;
             }
           }
         }
@@ -496,10 +577,12 @@
           }
 
           if (!nodesMap.has(src)) {
-            nodesMap.set(src, { id: src, shape: 'process', color: 'sky', label: src, x: 0, y: 0, width: 140, height: 52 });
+            const sDims = computeNodeDimensions('process', src);
+            nodesMap.set(src, { id: src, shape: 'process', color: 'sky', label: src, x: 0, y: 0, width: sDims.width, height: sDims.height });
           }
           if (!nodesMap.has(tgt)) {
-            nodesMap.set(tgt, { id: tgt, shape: 'process', color: 'sky', label: tgt, x: 0, y: 0, width: 140, height: 52 });
+            const tDims = computeNodeDimensions('process', tgt);
+            nodesMap.set(tgt, { id: tgt, shape: 'process', color: 'sky', label: tgt, x: 0, y: 0, width: tDims.width, height: tDims.height });
           }
 
           newEdges.push({
@@ -610,8 +693,8 @@
       layers[r].push(n);
     });
 
-    const layerSpacing = isHorizontal ? 270 : 150;
-    const nodeSpacing = isHorizontal ? 120 : 230;
+    const layerSpacing = isHorizontal ? 280 : 160;
+    const nodeSpacing = isHorizontal ? 130 : 250;
     const startX = 140;
     const startY = 110;
 
@@ -638,7 +721,7 @@
     });
 
     // Collision Resolution Pass (AABB Separation)
-    const minGap = 24;
+    const minGap = 26;
     const nodeList = state.nodes.map(n => ({
       id: n.id,
       x: targetPositions[n.id] ? targetPositions[n.id].x : n.x,
@@ -774,7 +857,7 @@
     if (dom.statEdges) dom.statEdges.textContent = `${state.edges.length} conexiones`;
   }
 
-  // --- RENDERING CANVAS (AUTHENTIC SVG VECTOR NODES) ---
+  // --- RENDERING CANVAS ---
   function render() {
     renderNodes();
     renderEdges();
@@ -786,8 +869,12 @@
 
     state.nodes.forEach(node => {
       const shapeDef = SHAPES[node.shape] || SHAPES.process;
-      const w = node.width || shapeDef.defaultWidth;
-      const h = node.height || shapeDef.defaultHeight;
+      const dims = computeNodeDimensions(node.shape, node.label);
+      node.width = dims.width;
+      node.height = dims.height;
+
+      const w = node.width;
+      const h = node.height;
       const isSelected = state.selectedNodeId === node.id;
       const isEditing = state.editingNodeId === node.id;
 
@@ -799,7 +886,7 @@
       nodeEl.style.height = `${h}px`;
       nodeEl.dataset.id = node.id;
 
-      // 1. Pure SVG Vector Graphic Backdrop
+      // 1. Dynamic Pure SVG Vector Shape
       const svgBg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svgBg.setAttribute('class', 'node-vector-svg');
       svgBg.setAttribute('viewBox', `0 0 ${w} ${h}`);
@@ -813,11 +900,8 @@
         input.className = 'node-inline-input';
         input.value = node.label;
         input.addEventListener('blur', () => {
-          node.label = input.value.trim() || shapeDef.defaultText;
+          updateNodeText(node.id, input.value);
           state.editingNodeId = null;
-          render();
-          saveState();
-          positionNodeToolbar(node);
         });
         input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') input.blur();
@@ -862,7 +946,7 @@
       const p2 = getPortCoordinates(toNode, edge.toPort || 'top');
       const isSelected = state.selectedEdgeId === edge.id;
 
-      const pathStr = calculateSmoothPath(p1, p2, edge.fromPort, edge.toPort);
+      const pathStr = calculateConnectorPath(p1, p2, edge.fromPort, edge.toPort, state.connStyle);
 
       // Hit path for smooth clicks
       const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -916,9 +1000,8 @@
   }
 
   function getPortCoordinates(node, port) {
-    const shapeDef = SHAPES[node.shape] || SHAPES.process;
-    const w = node.width || shapeDef.defaultWidth;
-    const h = node.height || shapeDef.defaultHeight;
+    const w = node.width || 140;
+    const h = node.height || 52;
     switch (port) {
       case 'top': return { x: node.x + w / 2, y: node.y };
       case 'bottom': return { x: node.x + w / 2, y: node.y + h };
@@ -928,7 +1011,22 @@
     }
   }
 
-  function calculateSmoothPath(p1, p2, fromPort, toPort) {
+  function calculateConnectorPath(p1, p2, fromPort, toPort, style = 'curved') {
+    if (style === 'straight') {
+      return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+    }
+
+    if (style === 'orthogonal') {
+      const midY = (p1.y + p2.y) / 2;
+      const midX = (p1.x + p2.x) / 2;
+      if (fromPort === 'bottom' || fromPort === 'top') {
+        return `M ${p1.x} ${p1.y} L ${p1.x} ${midY} L ${p2.x} ${midY} L ${p2.x} ${p2.y}`;
+      } else {
+        return `M ${p1.x} ${p1.y} L ${midX} ${p1.y} L ${midX} ${p2.y} L ${p2.x} ${p2.y}`;
+      }
+    }
+
+    // Default: Smooth cubic Bézier
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -973,8 +1071,7 @@
       }
     }
 
-    const shapeDef = SHAPES[node.shape] || SHAPES.process;
-    const nodeWidth = node.width || shapeDef.defaultWidth;
+    const nodeWidth = node.width || 140;
     const screenX = (node.x + nodeWidth / 2) * state.zoom + state.pan.x;
     const screenY = node.y * state.zoom + state.pan.y - 44;
 
@@ -1028,6 +1125,223 @@
     if (dom.edgePopover) dom.edgePopover.classList.remove('visible');
   }
 
+  // --- INTERACTIVE MINIMAP ---
+  function updateMinimap() {
+    if (!dom.minimapSvg || !dom.minimap) return;
+    if (state.nodes.length === 0) {
+      dom.minimapSvg.innerHTML = '';
+      return;
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    state.nodes.forEach(n => {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + (n.width || 140));
+      maxY = Math.max(maxY, n.y + (n.height || 52));
+    });
+
+    const padding = 60;
+    minX -= padding; minY -= padding;
+    maxX += padding; maxY += padding;
+
+    const graphW = Math.max(maxX - minX, 200);
+    const graphH = Math.max(maxY - minY, 150);
+
+    dom.minimapSvg.setAttribute('viewBox', `${minX} ${minY} ${graphW} ${graphH}`);
+
+    let svgHtml = '';
+    // Draw edges
+    state.edges.forEach(e => {
+      const fn = state.nodes.find(n => n.id === e.from);
+      const tn = state.nodes.find(n => n.id === e.to);
+      if (fn && tn) {
+        const p1 = getPortCoordinates(fn, e.fromPort || 'bottom');
+        const p2 = getPortCoordinates(tn, e.toPort || 'top');
+        svgHtml += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#475569" stroke-width="2"/>`;
+      }
+    });
+
+    // Draw nodes
+    state.nodes.forEach(n => {
+      const color = n.color === 'emerald' ? '#10b981' : (n.color === 'amber' ? '#f59e0b' : (n.color === 'purple' ? '#a855f7' : '#0284c7'));
+      svgHtml += `<rect x="${n.x}" y="${n.y}" width="${n.width || 140}" height="${n.height || 52}" rx="4" fill="${color}" opacity="0.8"/>`;
+    });
+
+    dom.minimapSvg.innerHTML = svgHtml;
+  }
+
+  // --- EXPORT TOOLS (SVG / PNG / CLIPBOARD) ---
+  function generateStandaloneSvg() {
+    if (state.nodes.length === 0) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    state.nodes.forEach(n => {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + (n.width || 140));
+      maxY = Math.max(maxY, n.y + (n.height || 52));
+    });
+
+    const pad = 40;
+    const w = maxX - minX + pad * 2;
+    const h = maxY - minY + pad * 2;
+    const ox = minX - pad;
+    const oy = minY - pad;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">\n`;
+    svg += `  <style>\n`;
+    svg += `    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }\n`;
+    svg += `    .edge { stroke: #64748b; stroke-width: 2.5px; fill: none; }\n`;
+    svg += `    .label-bg { fill: #1e293b; stroke: #475569; rx: 4px; }\n`;
+    svg += `  </style>\n`;
+    svg += `  <defs>\n`;
+    svg += `    <marker id="m-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">\n`;
+    svg += `      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>\n`;
+    svg += `    </marker>\n`;
+    svg += `  </defs>\n`;
+    svg += `  <rect width="100%" height="100%" fill="${state.theme === 'dark' ? '#090d16' : '#ffffff'}"/>\n`;
+
+    // Edges
+    state.edges.forEach(edge => {
+      const fn = state.nodes.find(n => n.id === edge.from);
+      const tn = state.nodes.find(n => n.id === edge.to);
+      if (!fn || !tn) return;
+
+      const p1 = getPortCoordinates(fn, edge.fromPort || 'bottom');
+      const p2 = getPortCoordinates(tn, edge.toPort || 'top');
+      const d = calculateConnectorPath(
+        { x: p1.x - ox, y: p1.y - oy },
+        { x: p2.x - ox, y: p2.y - oy },
+        edge.fromPort, edge.toPort, state.connStyle
+      );
+      svg += `  <path d="${d}" class="edge" marker-end="url(#m-arr)"/>\n`;
+
+      if (edge.label) {
+        const mid = getPathMidpoint({ x: p1.x - ox, y: p1.y - oy }, { x: p2.x - ox, y: p2.y - oy });
+        const tw = Math.max(edge.label.length * 7.5 + 14, 30);
+        svg += `  <rect x="${mid.x - tw / 2}" y="${mid.y - 10}" width="${tw}" height="20" class="label-bg"/>\n`;
+        svg += `  <text x="${mid.x}" y="${mid.y + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="#f8fafc">${edge.label}</text>\n`;
+      }
+    });
+
+    // Nodes
+    state.nodes.forEach(n => {
+      const shapeDef = SHAPES[n.shape] || SHAPES.process;
+      const nx = n.x - ox;
+      const ny = n.y - oy;
+      const nw = n.width || 140;
+      const nh = n.height || 52;
+      const strokeColor = n.color === 'emerald' ? '#10b981' : (n.color === 'amber' ? '#f59e0b' : (n.color === 'purple' ? '#a855f7' : (n.color === 'rose' ? '#ef4444' : '#0284c7')));
+      const fillColor = n.color === 'emerald' ? '#064e3b' : (n.color === 'amber' ? '#78350f' : (n.color === 'purple' ? '#581c87' : (n.color === 'rose' ? '#881337' : '#0c4a6e')));
+
+      svg += `  <g transform="translate(${nx}, ${ny})">\n`;
+      svg += `    <g fill="${fillColor}" stroke="${strokeColor}" stroke-width="2">\n`;
+      svg += `      ${shapeDef.generateSvg(nw, nh)}\n`;
+      svg += `    </g>\n`;
+      const lines = (n.label || shapeDef.defaultText).split(/\n|<br\s*[\/]?>/i);
+      const startTextY = nh / 2 - ((lines.length - 1) * 16) / 2 + 4;
+      lines.forEach((line, i) => {
+        svg += `    <text x="${nw / 2}" y="${startTextY + i * 16}" text-anchor="middle" font-size="12.5" font-weight="700" fill="#f8fafc">${line.trim()}</text>\n`;
+      });
+      svg += `  </g>\n`;
+    });
+
+    svg += `</svg>`;
+    return svg;
+  }
+
+  function exportSvg() {
+    const svgStr = generateStandaloneSvg();
+    if (!svgStr) { showToast('Diagrama vacío'); return; }
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `diagrama_${Date.now().toString(36)}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('📐 Vector SVG descargado');
+  }
+
+  function copySvg() {
+    const svgStr = generateStandaloneSvg();
+    if (!svgStr) { showToast('Diagrama vacío'); return; }
+    navigator.clipboard.writeText(svgStr).then(() => {
+      showToast('📋 SVG copiado al portapapeles');
+    }).catch(() => showToast('Error al copiar SVG'));
+  }
+
+  function exportPng() {
+    const svgStr = generateStandaloneSvg();
+    if (!svgStr) { showToast('Diagrama vacío'); return; }
+
+    const img = new Image();
+    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    img.onload = () => {
+      const scale = 2; // 2x Retina Resolution
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+
+      canvas.toBlob(blob => {
+        const pngUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = `diagrama_hd_${Date.now().toString(36)}.png`;
+        a.click();
+        URL.revokeObjectURL(pngUrl);
+        URL.revokeObjectURL(url);
+        showToast('🖼️ Imagen PNG (HD 2x) descargada');
+      }, 'image/png');
+    };
+    img.src = url;
+  }
+
+  function downloadMmd() {
+    const code = generateMermaidCode();
+    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `diagrama_mermaid_${Date.now().toString(36)}.mmd`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('📝 Archivo .mmd descargado');
+  }
+
+  function zoomToFit() {
+    if (state.nodes.length === 0) return;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    state.nodes.forEach(n => {
+      minX = Math.min(minX, n.x);
+      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + (n.width || 140));
+      maxY = Math.max(maxY, n.y + (n.height || 52));
+    });
+
+    const rect = dom.viewport.getBoundingClientRect();
+    const graphW = maxX - minX + 120;
+    const graphH = maxY - minY + 120;
+
+    const scaleX = rect.width / graphW;
+    const scaleY = rect.height / graphH;
+    const newZoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.4), 1.6);
+
+    state.zoom = newZoom;
+    state.pan.x = (rect.width - (maxX + minX) * newZoom) / 2;
+    state.pan.y = (rect.height - (maxY + minY) * newZoom) / 2;
+
+    updateWorldTransform();
+    showToast('⊞ Diagrama centrado');
+  }
+
   // --- EVENT LISTENERS ---
   function setupEventListeners() {
     window.addEventListener('resize', updateWorldTransform);
@@ -1039,7 +1353,7 @@
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
 
-    // Double Click on Canvas Background -> Create node instantly right there
+    // Double Click on Canvas Background -> Create node
     dom.viewport.addEventListener('dblclick', (e) => {
       if (e.target === dom.viewport || e.target.id === 'svg-canvas' || e.target.id === 'canvas-world') {
         const pt = screenToWorld(e.clientX, e.clientY);
@@ -1065,13 +1379,47 @@
     });
     dom.btnTheme.addEventListener('click', toggleTheme);
     dom.btnCopy.addEventListener('click', copyMermaidCode);
+
+    // Export Dropdown
+    dom.btnExportMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dom.exportDropdown.classList.toggle('visible');
+    });
+    document.addEventListener('click', () => dom.exportDropdown.classList.remove('visible'));
+
+    dom.btnExportSvg.addEventListener('click', exportSvg);
+    dom.btnExportPng.addEventListener('click', exportPng);
+    dom.btnCopySvg.addEventListener('click', copySvg);
     dom.btnDownloadMmd.addEventListener('click', downloadMmd);
 
     // Collapsible Code Panel
     dom.btnToggleCode.addEventListener('click', toggleCodePanel);
     dom.btnCloseCode.addEventListener('click', () => setCodePanel(false));
 
-    // EDITABLE CODE EVENTS (Bidirectional Live Parsing)
+    // Connector style change
+    if (dom.selectConnStyle) {
+      dom.selectConnStyle.addEventListener('change', (e) => {
+        state.connStyle = e.target.value;
+        render();
+        saveState();
+        showToast(`Flechas: ${e.target.options[e.target.selectedIndex].text}`);
+      });
+    }
+
+    // Direction & Auto Layout
+    dom.selectDirection.addEventListener('change', (e) => {
+      state.direction = e.target.value;
+      autoLayout(true);
+      saveState();
+    });
+    dom.btnAutoLayout.addEventListener('click', () => autoLayout(true));
+
+    // Zoom Controls
+    dom.zoomIn.addEventListener('click', () => setZoom(state.zoom + 0.15));
+    dom.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.15));
+    dom.zoomFit.addEventListener('click', zoomToFit);
+
+    // EDITABLE CODE EVENTS
     if (dom.mermaidCode) {
       dom.mermaidCode.addEventListener('focus', () => {
         state.isTypingCode = true;
@@ -1094,12 +1442,6 @@
           state.isTypingCode = false;
         }, 450);
       });
-
-      dom.mermaidCode.addEventListener('paste', () => {
-        setTimeout(() => {
-          parseAndApplyMermaidCode(dom.mermaidCode.value, true);
-        }, 50);
-      });
     }
 
     if (dom.btnApplyCode) {
@@ -1114,23 +1456,6 @@
         loadTemplate(e.target.value);
         e.target.value = '';
       }
-    });
-
-    // Direction & Auto Layout
-    dom.selectDirection.addEventListener('change', (e) => {
-      state.direction = e.target.value;
-      autoLayout(true);
-      saveState();
-    });
-    dom.btnAutoLayout.addEventListener('click', () => autoLayout(true));
-
-    // Zoom Controls
-    dom.zoomIn.addEventListener('click', () => setZoom(state.zoom + 0.15));
-    dom.zoomOut.addEventListener('click', () => setZoom(state.zoom - 0.15));
-    dom.zoomReset.addEventListener('click', () => {
-      state.zoom = 1;
-      state.pan = { x: 100, y: 90 };
-      updateWorldTransform();
     });
 
     // Node Toolbar Events
@@ -1216,8 +1541,7 @@
         const shape = btn.dataset.shape;
         const rect = dom.viewport.getBoundingClientRect();
         const center = screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
-        const shapeDef = SHAPES[shape] || SHAPES.process;
-        createNode(shape, center.x - shapeDef.defaultWidth / 2, center.y - shapeDef.defaultHeight / 2, null, state.activeColor);
+        createNode(shape, center.x - 70, center.y - 26, null, state.activeColor);
       });
     });
 
@@ -1293,7 +1617,7 @@
       return;
     }
 
-    if (e.target.closest('#node-floating-toolbar') || e.target.closest('#edge-floating-popover') || e.target.closest('#floating-dock') || e.target.closest('#sidebar-code')) {
+    if (e.target.closest('#node-floating-toolbar') || e.target.closest('#edge-floating-popover') || e.target.closest('#floating-dock') || e.target.closest('#sidebar-code') || e.target.closest('#export-dropdown')) {
       return;
     }
 
@@ -1315,7 +1639,7 @@
       if (fromNode) {
         const p1 = getPortCoordinates(fromNode, state.connectingFrom.port);
         const pt = screenToWorld(e.clientX, e.clientY);
-        dom.tempLine.setAttribute('d', calculateSmoothPath(p1, pt, state.connectingFrom.port, 'top'));
+        dom.tempLine.setAttribute('d', calculateConnectorPath(p1, pt, state.connectingFrom.port, 'top', state.connStyle));
       }
       return;
     }
@@ -1400,6 +1724,7 @@
     if (dom.zoomValue) {
       dom.zoomValue.textContent = `${Math.round(state.zoom * 100)}%`;
     }
+    updateMinimap();
   }
 
   function screenToWorld(clientX, clientY) {
@@ -1476,7 +1801,7 @@
     }
   }
 
-  // --- COPY & EXPORT ---
+  // --- COPY & TOAST ---
   function copyMermaidCode() {
     const code = generateMermaidCode();
     navigator.clipboard.writeText(code).then(() => {
@@ -1487,18 +1812,6 @@
         setTimeout(() => dom.btnCopy.innerHTML = originalHtml, 1600);
       }
     }).catch(() => showToast('Selecciona el código manualmente'));
-  }
-
-  function downloadMmd() {
-    const code = generateMermaidCode();
-    const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `diagrama_mermaid_${Date.now().toString(36)}.mmd`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('💾 Archivo .mmd descargado');
   }
 
   function showToast(msg) {
@@ -1519,13 +1832,14 @@
     const templates = {
       auth: {
         direction: 'TD',
+        connStyle: 'curved',
         nodes: [
-          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', x: 200, y: 50, width: 140, height: 52 },
-          { id: 'B', shape: 'io', color: 'cyan', label: 'Ingresar Credenciales', x: 200, y: 150, width: 150, height: 52 },
-          { id: 'C', shape: 'decision', color: 'amber', label: '¿Credenciales Válidas?', x: 200, y: 260, width: 160, height: 76 },
-          { id: 'D', shape: 'process', color: 'sky', label: 'Generar Token JWT', x: 80, y: 390, width: 140, height: 52 },
-          { id: 'E', shape: 'process', color: 'rose', label: 'Mostrar Error 401', x: 330, y: 390, width: 140, height: 52 },
-          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 510, width: 140, height: 52 }
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Inicio', x: 200, y: 50 },
+          { id: 'B', shape: 'io', color: 'cyan', label: 'Ingresar Credenciales', x: 200, y: 150 },
+          { id: 'C', shape: 'decision', color: 'amber', label: '¿Credenciales Válidas?', x: 200, y: 260 },
+          { id: 'D', shape: 'process', color: 'sky', label: 'Generar Token JWT', x: 80, y: 390 },
+          { id: 'E', shape: 'process', color: 'rose', label: 'Mostrar Error 401', x: 330, y: 390 },
+          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 510 }
         ],
         edges: [
           { id: 'e1', from: 'A', to: 'B', style: 'normal' },
@@ -1538,13 +1852,14 @@
       },
       payment: {
         direction: 'TD',
+        connStyle: 'curved',
         nodes: [
-          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Checkout Carrito', x: 200, y: 50, width: 140, height: 52 },
-          { id: 'B', shape: 'decision', color: 'amber', label: '¿Tarjeta Válida?', x: 200, y: 160, width: 160, height: 76 },
-          { id: 'C', shape: 'subroutine', color: 'purple', label: 'Pasarela Stripe', x: 80, y: 290, width: 150, height: 52 },
-          { id: 'D', shape: 'process', color: 'rose', label: 'Rechazar Pago', x: 340, y: 290, width: 140, height: 52 },
-          { id: 'E', shape: 'database', color: 'purple', label: 'Guardar Orden en DB', x: 80, y: 410, width: 140, height: 64 },
-          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 530, width: 140, height: 52 }
+          { id: 'A', shape: 'terminal', color: 'emerald', label: 'Checkout Carrito', x: 200, y: 50 },
+          { id: 'B', shape: 'decision', color: 'amber', label: '¿Tarjeta Válida?', x: 200, y: 160 },
+          { id: 'C', shape: 'subroutine', color: 'purple', label: 'Pasarela Stripe', x: 80, y: 290 },
+          { id: 'D', shape: 'process', color: 'rose', label: 'Rechazar Pago', x: 340, y: 290 },
+          { id: 'E', shape: 'database', color: 'purple', label: 'Guardar Orden en DB', x: 80, y: 410 },
+          { id: 'F', shape: 'terminal', color: 'emerald', label: 'Fin', x: 200, y: 530 }
         ],
         edges: [
           { id: 'ep1', from: 'A', to: 'B', style: 'normal' },
@@ -1557,13 +1872,14 @@
       },
       etl: {
         direction: 'LR',
+        connStyle: 'curved',
         nodes: [
-          { id: 'A', shape: 'database', color: 'purple', label: 'Fuente CSV / API', x: 50, y: 150, width: 140, height: 64 },
-          { id: 'B', shape: 'process', color: 'sky', label: 'Extracción Datos', x: 250, y: 150, width: 140, height: 52 },
-          { id: 'C', shape: 'decision', color: 'amber', label: '¿Schema Válido?', x: 450, y: 150, width: 160, height: 76 },
-          { id: 'D', shape: 'process', color: 'emerald', label: 'Transformar', x: 680, y: 100, width: 140, height: 52 },
-          { id: 'E', shape: 'database', color: 'rose', label: 'Dead Letter Queue', x: 680, y: 230, width: 140, height: 64 },
-          { id: 'F', shape: 'database', color: 'purple', label: 'Data Warehouse', x: 920, y: 100, width: 140, height: 64 }
+          { id: 'A', shape: 'database', color: 'purple', label: 'Fuente CSV / API', x: 50, y: 150 },
+          { id: 'B', shape: 'process', color: 'sky', label: 'Extracción Datos', x: 250, y: 150 },
+          { id: 'C', shape: 'decision', color: 'amber', label: '¿Schema Válido?', x: 450, y: 150 },
+          { id: 'D', shape: 'process', color: 'emerald', label: 'Transformar', x: 680, y: 100 },
+          { id: 'E', shape: 'database', color: 'rose', label: 'Dead Letter Queue', x: 680, y: 230 },
+          { id: 'F', shape: 'database', color: 'purple', label: 'Data Warehouse', x: 920, y: 100 }
         ],
         edges: [
           { id: 'ee1', from: 'A', to: 'B', style: 'normal' },
@@ -1575,6 +1891,7 @@
       },
       blank: {
         direction: 'TD',
+        connStyle: 'curved',
         nodes: [],
         edges: []
       }
@@ -1585,7 +1902,9 @@
       state.nodes = JSON.parse(JSON.stringify(tpl.nodes));
       state.edges = JSON.parse(JSON.stringify(tpl.edges));
       state.direction = tpl.direction;
+      state.connStyle = tpl.connStyle || 'curved';
       if (dom.selectDirection) dom.selectDirection.value = tpl.direction;
+      if (dom.selectConnStyle) dom.selectConnStyle.value = state.connStyle;
       state.selectedNodeId = null;
       state.selectedEdgeId = null;
       hideNodeToolbar();

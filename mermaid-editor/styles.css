@@ -1,11 +1,11 @@
-/* MermaidFlow Studio - True SVG Vector Flowchart Shapes UI */
+/* MermaidFlow Studio - Ultra-Responsive, Professional Vector Flowchart UI */
 :root {
   --bg-main: #090d16;
   --bg-panel: #111827;
   --bg-panel-subtle: #1e293b;
   --bg-dock: rgba(17, 24, 39, 0.92);
   --bg-canvas: #090d16;
-  --grid-dot: rgba(255, 255, 255, 0.06);
+  --grid-dot: rgba(255, 255, 255, 0.07);
   --border: #1f293d;
   --border-dock: rgba(255, 255, 255, 0.12);
   --border-focus: #38bdf8;
@@ -30,7 +30,7 @@
   --bg-panel-subtle: #f8fafc;
   --bg-dock: rgba(255, 255, 255, 0.95);
   --bg-canvas: #f8fafc;
-  --grid-dot: rgba(0, 0, 0, 0.06);
+  --grid-dot: rgba(0, 0, 0, 0.07);
   --border: #cbd5e1;
   --border-dock: rgba(0, 0, 0, 0.1);
   --border-focus: #0284c7;
@@ -94,6 +94,29 @@ header {
 }
 .divider-v { width: 1px; height: 20px; background: var(--border); }
 
+/* Export Dropdown */
+.export-dropdown-wrapper { position: relative; }
+.btn-export { background: rgba(56,189,248,0.12); color: #38bdf8; border-color: rgba(56,189,248,0.3); }
+.btn-export:hover { background: rgba(56,189,248,0.22); border-color: #38bdf8; }
+
+.export-dropdown {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 6px; width: 220px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); z-index: 60;
+  display: none; flex-direction: column; gap: 4px;
+}
+.export-dropdown.visible { display: flex; animation: popIn 0.12s ease-out; }
+
+.dropdown-item {
+  background: transparent; border: none; color: var(--text-main);
+  font-size: 12px; font-weight: 600; padding: 8px 10px; border-radius: 6px;
+  text-align: left; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  transition: all 0.12s;
+}
+.dropdown-item:hover { background: var(--bg-panel-subtle); color: #38bdf8; }
+.dropdown-divider { height: 1px; background: var(--border); margin: 2px 0; }
+
 .btn-copy-main {
   background: linear-gradient(135deg, #10b981, #059669);
   color: white; border: none; font-size: 12.5px; font-weight: 700;
@@ -121,7 +144,7 @@ header {
   border: 1px solid var(--border-dock);
   border-radius: 16px;
   padding: 6px 12px;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 9px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: 30;
   max-width: calc(100vw - 24px);
@@ -232,7 +255,7 @@ header {
 .nodes-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* =========================================================
-   AUTHENTIC SVG VECTOR FLOWCHART NODES
+   AUTHENTIC DYNAMIC SVG VECTOR FLOWCHART NODES
    ========================================================= */
 .canvas-node {
   position: absolute; pointer-events: auto;
@@ -244,7 +267,6 @@ header {
 }
 .canvas-node:hover { filter: brightness(1.12); }
 
-/* SVG Shape Container inside Node */
 .node-vector-svg {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   pointer-events: auto; overflow: visible;
@@ -263,10 +285,7 @@ header {
   stroke-width: 2px;
 }
 
-/* Selected State */
-.canvas-node.selected {
-  z-index: 25;
-}
+.canvas-node.selected { z-index: 25; }
 .canvas-node.selected .shape-svg-fill {
   stroke: #38bdf8 !important;
   stroke-width: 3px !important;
@@ -277,7 +296,7 @@ header {
   stroke-width: 3px !important;
 }
 
-/* Node Color Themes (Fill, Stroke, Text) */
+/* Color Themes */
 .color-emerald { --node-fill: #064e3b; --node-stroke: #10b981; color: #ecfdf5; }
 .color-sky     { --node-fill: #0c4a6e; --node-stroke: #0284c7; color: #f0f9ff; }
 .color-amber   { --node-fill: #78350f; --node-stroke: #f59e0b; color: #fffbeb; }
@@ -359,7 +378,6 @@ header {
   animation: popIn 0.12s ease-out;
 }
 .edge-floating-popover.visible { display: flex; }
-@keyframes popIn { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 .popover-header {
   display: flex; justify-content: space-between; align-items: center;
@@ -420,7 +438,21 @@ header {
 .zoom-btn:hover { background: var(--bg-panel-subtle); color: var(--text-main); }
 .zoom-text { font-size: 11.5px; font-family: var(--mono); font-weight: 700; padding: 0 6px; }
 
-/* COLLAPSIBLE CODE PANEL (Editable & Bidirectional) */
+/* Interactive Minimap */
+.canvas-minimap {
+  position: absolute; bottom: 20px; right: 20px;
+  width: 160px; height: 110px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45); z-index: 35;
+}
+.minimap-svg { width: 100%; height: 100%; pointer-events: none; }
+.minimap-viewfinder {
+  position: absolute; border: 1.5px solid #38bdf8; background: rgba(56, 189, 248, 0.15);
+  pointer-events: none; border-radius: 2px;
+}
+
+/* COLLAPSIBLE CODE PANEL */
 .sidebar-code {
   width: 400px; background: var(--bg-panel);
   border-left: 1px solid var(--border);
@@ -466,19 +498,13 @@ header {
 
 .code-footer-actions { display: flex; gap: 8px; }
 .btn-apply-code {
-  flex: 1.4; background: linear-gradient(135deg, #0284c7, #0369a1);
+  flex: 1; background: linear-gradient(135deg, #0284c7, #0369a1);
   color: white; border: none; font-size: 12px; font-weight: 700; padding: 8px;
   border-radius: 6px; cursor: pointer; text-align: center; transition: all 0.15s;
 }
 .btn-apply-code:hover {
   background: linear-gradient(135deg, #0369a1, #075985); transform: translateY(-1px);
 }
-.btn-download-file {
-  flex: 1; background: var(--bg-panel-subtle); border: 1px solid var(--border);
-  color: var(--text-main); font-size: 12px; font-weight: 600; padding: 8px;
-  border-radius: 6px; cursor: pointer; text-align: center; transition: all 0.15s;
-}
-.btn-download-file:hover { border-color: var(--border-focus); }
 
 /* Toast */
 .toast-container {
@@ -497,6 +523,7 @@ header {
 @media (max-width: 1024px) {
   .sidebar-code { width: 340px; }
   .floating-dock { padding: 5px 10px; gap: 6px; }
+  .canvas-minimap { display: none; }
 }
 
 @media (max-width: 800px) {

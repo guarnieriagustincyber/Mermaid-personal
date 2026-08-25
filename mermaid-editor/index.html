@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MermaidFlow Studio - Editor Visual y Código Bidireccional</title>
+  <title>MermaidFlow Studio - Editor Visual y Diagramas Profesionales</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-  <!-- Minimal Top Header -->
+  <!-- Top Header -->
   <header>
     <div class="header-left">
       <div class="brand-logo">⚡</div>
       <span class="brand-title">MermaidFlow</span>
-      <span class="brand-badge">Bidireccional</span>
+      <span class="brand-badge">Pro Studio</span>
     </div>
 
     <div class="header-center">
@@ -36,10 +36,23 @@
     </div>
 
     <div class="header-right">
+      <div class="export-dropdown-wrapper">
+        <button id="btn-export-menu" class="hdr-btn btn-export" title="Exportar Diagrama">
+          <span>💾 Exportar</span> ▾
+        </button>
+        <div class="export-dropdown" id="export-dropdown">
+          <button id="btn-export-svg" class="dropdown-item">📐 Descargar Vector SVG</button>
+          <button id="btn-export-png" class="dropdown-item">🖼️ Descargar Imagen PNG (HD)</button>
+          <button id="btn-copy-svg" class="dropdown-item">📋 Copiar SVG al Portapapeles</button>
+          <div class="dropdown-divider"></div>
+          <button id="btn-download-mmd" class="dropdown-item">📝 Descargar Código .mmd</button>
+        </div>
+      </div>
+
       <button id="btn-theme-toggle" class="hdr-btn" title="Cambiar Tema Oscuro/Claro">🌓</button>
       <button id="btn-toggle-code" class="hdr-btn active" title="Mostrar/Ocultar Panel de Código">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-        <span>Código (Editable)</span>
+        <span>Código</span>
       </button>
       <button id="btn-copy-mermaid" class="btn-copy-main" title="Copiar código Mermaid al portapapeles">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -51,10 +64,10 @@
   <!-- Main Canvas Workspace -->
   <div class="workspace-wrapper">
 
-    <!-- FLOATING ISLAND TOOLBAR (Top Center Dock with rounded corners) -->
+    <!-- FLOATING ISLAND TOOLBAR (Top Center Responsive Island) -->
     <div class="floating-dock" id="floating-dock">
       
-      <!-- Shape buttons with inline SVG icons -->
+      <!-- Shape buttons with inline SVG vector icons -->
       <div class="dock-section">
         <span class="dock-label">Formas:</span>
         <div class="dock-buttons">
@@ -68,12 +81,12 @@
             <span>Proceso</span>
           </button>
           
-          <button class="dock-btn" data-shape="decision" title="Decisión / Condición {¿Texto?}">
+          <button class="dock-btn" data-shape="decision" title="Decisión / Rombo {¿Texto?}">
             <svg width="18" height="18" viewBox="0 0 24 24"><polygon points="12 2, 22 12, 12 22, 2 12" fill="rgba(245,158,11,0.25)" stroke="#f59e0b" stroke-width="1.8"/></svg>
             <span>Decisión</span>
           </button>
           
-          <button class="dock-btn" data-shape="database" title="Base de Datos [(Texto)]">
+          <button class="dock-btn" data-shape="database" title="Base de Datos / Cilindro [(Texto)]">
             <svg width="18" height="18" viewBox="0 0 24 24">
               <path d="M4 6 C4 3 20 3 20 6 L20 18 C20 21 4 21 4 18 Z" fill="rgba(168,85,247,0.25)" stroke="#a855f7" stroke-width="1.6"/>
               <ellipse cx="12" cy="6" rx="8" ry="3" fill="none" stroke="#a855f7" stroke-width="1.6"/>
@@ -115,13 +128,24 @@
 
       <div class="dock-divider"></div>
 
+      <!-- Connector Style Picker -->
+      <div class="dock-section">
+        <select id="select-conn-style" class="dock-select" title="Estilo de Flechas">
+          <option value="curved">〰️ Curvas</option>
+          <option value="orthogonal">📐 Ortogonales (90°)</option>
+          <option value="straight">📏 Rectas</option>
+        </select>
+      </div>
+
+      <div class="dock-divider"></div>
+
       <!-- Direction & Auto-Layout -->
       <div class="dock-section">
         <select id="select-direction" class="dock-select" title="Dirección del diagrama">
-          <option value="TD">↓ Arriba-Abajo (TD)</option>
-          <option value="LR">→ Izq-Der (LR)</option>
-          <option value="BT">↑ Abajo-Arriba (BT)</option>
-          <option value="RL">← Der-Izq (RL)</option>
+          <option value="TD">↓ TD</option>
+          <option value="LR">→ LR</option>
+          <option value="BT">↑ BT</option>
+          <option value="RL">← RL</option>
         </select>
 
         <button id="btn-auto-layout" class="btn-dock-action" title="Auto-Organizar nodos jerárquicamente">
@@ -201,7 +225,13 @@
         <button id="btn-zoom-out" class="zoom-btn" title="Alejar (−)">−</button>
         <span id="zoom-value" class="zoom-text">100%</span>
         <button id="btn-zoom-in" class="zoom-btn" title="Acercar (+)">+</button>
-        <button id="btn-zoom-reset" class="zoom-btn" title="Restablecer">⟲</button>
+        <button id="btn-zoom-fit" class="zoom-btn" title="Centrar y Ajustar (⊞)">⊞</button>
+      </div>
+
+      <!-- Floating Live Minimap -->
+      <div class="canvas-minimap" id="canvas-minimap">
+        <svg id="minimap-svg" class="minimap-svg"></svg>
+        <div id="minimap-viewfinder" class="minimap-viewfinder"></div>
       </div>
     </main>
 
@@ -216,11 +246,11 @@
       </div>
 
       <div class="code-panel-info-bar">
-        <span>✍️ Puedes editar o pegar código aquí (se auto-organiza en el lienzo)</span>
+        <span>✍️ Escribe o pega código aquí para auto-estructurar el diagrama</span>
       </div>
 
       <div class="code-panel-body">
-        <textarea id="mermaid-code-output" placeholder="Pega o escribe tu código Mermaid aquí (ej: flowchart TD...)" spellcheck="false"></textarea>
+        <textarea id="mermaid-code-output" placeholder="Pega o escribe tu código Mermaid aquí..." spellcheck="false"></textarea>
       </div>
 
       <div class="code-panel-footer">
@@ -233,9 +263,6 @@
           <button id="btn-apply-code" class="btn-apply-code" title="Parsear y auto-organizar en el lienzo">
             ⚡ Aplicar Código al Lienzo
           </button>
-          <button id="btn-download-mmd" class="btn-download-file" title="Descargar archivo .mmd">
-            💾 Guardar .mmd
-          </button>
         </div>
       </div>
     </aside>
@@ -245,7 +272,7 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
 
-  <!-- Main JavaScript App with Bidirectional Parser -->
+  <!-- Main JavaScript App -->
   <script src="app.js"></script>
 </body>
 </html>
