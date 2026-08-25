@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MermaidFlow Studio - Editor Visual de Diagramas de Flujo</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Mermaid.js para renderizado en vivo (cuando hay conexión) -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div>
+        <h1>MermaidFlow Studio</h1>
+      </div>
+      <span class="badge">Visual to Mermaid</span>
+    </div>
+
+    <!-- Center Quick Actions -->
+    <div class="header-center">
+      <button id="btn-auto-layout" class="btn-primary" title="Ordenar automáticamente los nodos sin cruces">
+        <span>⚡ Auto-Organizar</span>
+      </button>
+
+      <select id="select-direction" title="Orientación del diagrama">
+        <option value="TD">Arriba ➔ Abajo (TD)</option>
+        <option value="LR">Izquierda ➔ Derecha (LR)</option>
+        <option value="BT">Abajo ➔ Arriba (BT)</option>
+        <option value="RL">Derecha ➔ Izquierda (RL)</option>
+      </select>
+
+      <select id="select-template" title="Cargar plantilla de ejemplo">
+        <option value="">📂 Plantillas...</option>
+        <option value="auth">🔐 Autenticación y Token JWT</option>
+        <option value="payment">💳 Pasarela de Pago & Checkout</option>
+        <option value="etl">📊 Pipeline de Datos (ETL)</option>
+      </select>
+    </div>
+
+    <!-- Right Actions -->
+    <div class="header-right">
+      <button id="btn-clear" class="btn-ghost" title="Limpiar lienzo">🗑️ Limpiar</button>
+      <button id="btn-theme-toggle" class="btn-ghost" title="Cambiar Tema">🌓 Modo</button>
+      <button id="btn-copy" class="btn-success" title="Copiar código Mermaid al portapapeles">
+        <span>📋 Copiar Mermaid</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Work Area -->
+  <div class="app-container">
+
+    <!-- Left Sidebar: Node Shapes Palette -->
+    <aside class="sidebar-palette">
+      <div class="sidebar-title">Formas de Flujo</div>
+      
+      <div class="palette-items">
+        <div class="palette-card" data-type="terminal" title="Clic para añadir">
+          <div class="palette-shape-icon">
+            <div class="shape-preview-terminal"></div>
+          </div>
+          <div class="palette-info">
+            <span class="palette-name">Inicio / Fin</span>
+            <span class="palette-syntax">([Texto])</span>
+          </div>
+        </div>
+
+        <div class="palette-card" data-type="process" title="Clic para añadir">
+          <div class="palette-shape-icon">
+            <div class="shape-preview-process"></div>
+          </div>
+          <div class="palette-info">
+            <span class="palette-name">Proceso</span>
+            <span class="palette-syntax">[Texto]</span>
+          </div>
+        </div>
+
+        <div class="palette-card" data-type="decision" title="Clic para añadir">
+          <div class="palette-shape-icon">
+            <div class="shape-preview-decision"></div>
+          </div>
+          <div class="palette-info">
+            <span class="palette-name">Decisión</span>
+            <span class="palette-syntax">{¿Condición?}</span>
+          </div>
+        </div>
+
+        <div class="palette-card" data-type="database" title="Clic para añadir">
+          <div class="palette-shape-icon">
+            <div class="shape-preview-database"></div>
+          </div>
+          <div class="palette-info">
+            <span class="palette-name">Base de Datos</span>
+            <span class="palette-syntax">[(Datos)]</span>
+          </div>
+        </div>
+
+        <div class="palette-card" data-type="io" title="Clic para añadir">
+          <div class="palette-shape-icon">
+            <div class="shape-preview-io"></div>
+          </div>
+          <div class="palette-info">
+            <span class="palette-name">Entrada / Salida</span>
+            <span class="palette-syntax">[/Lectura/]</span>
+          </div>
+        </div>
+
+        <div class="palette-card" data-type="subroutine" title="Clic para añadir">
+          <div class="palette-shape-icon">
+            <div class="shape-preview-subroutine"></div>
+          </div>
+          <div class="palette-info">
+            <span class="palette-name">Subproceso</span>
+            <span class="palette-syntax">[[Subrutina]]</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div>💡 <b>Atajos:</b></div>
+        <div>• <b>Doble clic:</b> Nuevo proceso o editar texto</div>
+        <div>• <b>Arrastrar puntos:</b> Conectar nodos</div>
+        <div>• <b>Supr / Backspace:</b> Borrar</div>
+        <div>• <b>Ctrl+Z / Ctrl+Y:</b> Deshacer / Rehacer</div>
+      </div>
+    </aside>
+
+    <!-- Canvas Area -->
+    <main class="canvas-wrapper" id="canvas-wrapper">
+      <div id="graph-canvas">
+        <!-- SVG Connections Layer -->
+        <svg id="svg-layer">
+          <defs>
+            <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+            </marker>
+            <marker id="arrowhead-selected" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+            </marker>
+          </defs>
+          <g id="edges-group"></g>
+          <path id="temp-edge" class="temp-edge" style="display: none;" />
+        </svg>
+
+        <!-- HTML Interactive Nodes Layer -->
+        <div id="nodes-layer"></div>
+      </div>
+
+      <!-- Edge Inspector Popover (Floating) -->
+      <div class="edge-popover" id="edge-popover">
+        <label>Etiqueta de Conexión</label>
+        <input type="text" id="edge-label-input" placeholder="Ej: Sí, No, Error..." />
+        
+        <div class="chip-container">
+          <span class="chip" data-val="Sí">Sí</span>
+          <span class="chip" data-val="No">No</span>
+          <span class="chip" data-val="OK">OK</span>
+          <span class="chip" data-val="Error">Error</span>
+          <span class="chip" data-val="Default">Default</span>
+        </div>
+
+        <label style="margin-top: 4px;">Estilo de Flecha</label>
+        <select id="edge-style-select">
+          <option value="normal">Normal (-->)</option>
+          <option value="dotted">Punteada (-.->)</option>
+          <option value="thick">Gruesa (==>)</option>
+          <option value="open">Sin flecha (---)</option>
+        </select>
+      </div>
+
+      <!-- Bottom Floating Canvas Controls -->
+      <div class="canvas-controls">
+        <button id="btn-zoom-out" class="btn-ghost" title="Alejar (-)">−</button>
+        <span class="zoom-indicator" id="zoom-level">100%</span>
+        <button id="btn-zoom-in" class="btn-ghost" title="Acercar (+)">+</button>
+        <button id="btn-zoom-reset" class="btn-ghost" title="Restablecer Zoom (100%)">⟲</button>
+      </div>
+    </main>
+
+    <!-- Right Sidebar: Mermaid Code & Live Preview -->
+    <aside class="sidebar-code">
+      <div class="code-header">
+        <div class="code-header-title">
+          <span>Código Mermaid</span>
+        </div>
+        <div class="code-tabs">
+          <button class="code-tab active" id="tab-code">Código</button>
+          <button class="code-tab" id="tab-preview">Previsualización</button>
+        </div>
+      </div>
+
+      <div class="code-content-wrapper">
+        <textarea id="mermaid-code" class="code-textarea" readonly spellcheck="false"></textarea>
+        <div id="mermaid-preview" class="mermaid-preview-container"></div>
+      </div>
+
+      <div class="code-footer">
+        <div class="quick-stats">
+          <span id="node-count">0 nodos</span>
+          <span id="edge-count">0 conexiones</span>
+          <span>Sintaxis v10</span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="btn-export-mmd" class="btn-ghost" style="flex: 1; justify-content: center;" title="Descargar archivo de texto .mmd">
+            💾 Guardar .mmd
+          </button>
+          <button id="btn-export-svg" class="btn-ghost" style="flex: 1; justify-content: center;" title="Descargar como gráfico SVG">
+            🖼️ SVG
+          </button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Core App Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
